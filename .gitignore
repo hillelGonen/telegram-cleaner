@@ -1,0 +1,12 @@
+# Secrets: session file = full Telegram account access
+*.session
+*.session-journal
+.env
+
+# Local data (db, backups)
+data/
+
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/

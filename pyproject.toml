@@ -1,0 +1,33 @@
+[project]
+name = "tgo"
+version = "0.1.0"
+description = "Clean up your Telegram from the terminal: leave dead chats, quiet unread channels, sort into folders."
+authors = [
+    { name = "hillelGonen" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.14.1",
+    "pydantic-settings>=2.16.1",
+    "python-bidi>=0.6.12",
+    "python-dotenv>=1.2.4",
+    "questionary>=2.1.1",
+    "rich>=15.0.0",
+    "telethon>=1.45.0",
+    "typer>=0.27.3",
+]
+
+[project.scripts]
+tgo = "tgo.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.11.0,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["tests"]
