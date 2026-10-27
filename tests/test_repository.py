@@ -9,18 +9,16 @@ from tgo.repository import Repository
 
 def test_chats_roundtrip_and_remove_unseen(tmp_path, scan_time):
     with Repository(tmp_path / "t.db") as repo:
-        repo.save_chats([make_chat(1, title="חדשות", unread=3), make_chat(2)])
-        repo.save_details(1, "about", 500, scan_time)
+        repo.save_chats([make_chat(1, title="חדשות", unread=3, members=500), make_chat(2)])
 
         later = scan_time + timedelta(hours=1)
         repo.save_chats([make_chat(1, title="A2").model_copy(update={"seen_at": later})])
         assert repo.remove_unseen(later) == 1
 
         [chat] = repo.chats()
-        assert (chat.title, chat.about, chat.members) == ("A2", "about", 500)  # details kept
+        assert (chat.title, chat.members) == ("A2", None)  # rescan replaces values
         assert chat.type == ChatType.CHANNEL
         assert chat.last_msg_date == scan_time - timedelta(days=1)
-        assert repo.chats_missing_details() == []
 
 
 def test_folders_meta_and_limits(tmp_path, scan_time):

@@ -1,10 +1,10 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from tgo.models import Chat, ChatType, Folder, FolderFlags
 
-SCAN = datetime(2026, 10, 25, 12, 0, tzinfo=timezone.utc)
+SCAN = datetime(2026, 10, 25, 12, 0, tzinfo=UTC)
 
 
 def make_chat(id: int, type: ChatType = ChatType.CHANNEL, idle_days: int | None = 1, **kw) -> Chat:

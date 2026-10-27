@@ -1,4 +1,6 @@
-# tgo — tidy up your Telegram
+# telegram-cleaner
+
+[![CI](https://github.com/hillelGonen/telegram-cleaner/actions/workflows/ci.yml/badge.svg)](https://github.com/hillelGonen/telegram-cleaner/actions/workflows/ci.yml)
 
 A small menu that helps you clean up and organize Telegram: delete old chats, leave dead groups,
 quiet noisy channels, and sort channels into folders.
@@ -66,7 +68,9 @@ src/tgo/
   text.py          bidi + markup escaping
 ```
 
-## Tests
+## Development
 ```
-uv run pytest
+uv run pytest        # tests (no Telegram account needed; Telegram is faked)
+uv run ruff check .  # lint
 ```
+CI runs both on every push.

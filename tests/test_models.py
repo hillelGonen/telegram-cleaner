@@ -32,5 +32,3 @@ def test_folder_index():
     idx = FolderIndex([news, picked], chats)
     assert [f.title for f in idx.showing(chats[0])] == ["News", "Pick"]
     assert idx.in_no_folder(chats[1])
-    assert [f.title for f in idx.listing(chats[0])] == ["Pick"]  # flags don't count as listed
-    assert idx.shown_count(news) == 1

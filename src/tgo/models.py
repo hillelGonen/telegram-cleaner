@@ -1,11 +1,11 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(microsecond=0)
+    return datetime.now(UTC).replace(microsecond=0)
 
 
 class ChatType(StrEnum):
@@ -20,7 +20,6 @@ class Chat(BaseModel):
     type: ChatType
     title: str
     username: str | None = None
-    about: str | None = None
     members: int | None = None
     last_msg_date: datetime | None = None
     unread: int = 0
@@ -29,7 +28,6 @@ class Chat(BaseModel):
     pinned: bool = False
     contact: bool = False  # user is in contacts (folder flags use it)
     creator: bool = False  # you own this channel/group
-    details_fetched_at: datetime | None = None
     seen_at: datetime
 
     @property
@@ -125,4 +123,3 @@ class ScanResult(BaseModel):
     chats: int
     removed: int
     folders: int
-    details_fetched: int = 0

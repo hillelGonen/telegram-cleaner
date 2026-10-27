@@ -11,7 +11,7 @@ from tgo.cleanup import ActionLog, CleanupAction, CleanupExecutor, CleanupResult
 from tgo.folder_index import FolderIndex
 from tgo.models import Chat, ChatType, Folder, FolderKind, FolderLimits, utcnow
 from tgo.prompter import Option, Prompter
-from tgo.report import CleanupReporter, ReportOptions
+from tgo.report import CleanupReporter
 from tgo.repository import Repository
 from tgo.scanner import Scanner
 from tgo.selection import ChatFilter, ChatSelector
@@ -130,8 +130,7 @@ class TgoApp:
         chats, folders, repo = self.load()
         with repo:
             scanned_at, limits = repo.last_scan, repo.folder_limits
-        options = ReportOptions(dead_days=365, unread_min=1000)
-        report = CleanupReporter(chats, folders, scanned_at, limits, options).build()
+        report = CleanupReporter(chats, folders, scanned_at).build()
         OverviewView(self.console, self.text).render(chats, report, FolderIndex(folders, chats),
                                                      limits, scanned_at)
 
@@ -147,7 +146,7 @@ class TgoApp:
             return
         if age == 0 and not self.ask.confirm("Include chats of any age (also active ones)?", default=False):
             return
-        action = self.ask.select("What to do with them?", [Option(l, a) for l, a in CLEAN_ACTIONS])
+        action = self.ask.select("What to do with them?", [Option(label, a) for label, a in CLEAN_ACTIONS])
         if action is None:
             return
         self._pick_and_run(ChatFilter(types=types, idle_days=age or None), action)
@@ -157,7 +156,7 @@ class TgoApp:
                                  [Option(f"{n:,} unread", n) for n in UNREAD_LEVELS])
         if unread is None:
             return
-        action = self.ask.select("What to do with them?", [Option(l, a) for l, a in UNREAD_ACTIONS])
+        action = self.ask.select("What to do with them?", [Option(label, a) for label, a in UNREAD_ACTIONS])
         if action is None:
             return
         flt = ChatFilter(types=[ChatType.CHANNEL, ChatType.GROUP], unread_min=unread,
@@ -208,7 +207,8 @@ class TgoApp:
             return
         room = limits.chats_per_folder - len(already)
         if len(picked) > room:
-            self.console.print(f"[red]'{name}' has room for {room} more chats; you picked {len(picked)}.[/red]")
+            self.console.print(f"[red]'{name}' has room for {room} more chats; "
+                               f"you picked {len(picked)}.[/red]")
             return
         if not self.ask.confirm(f"Add {len(picked)} chats to '{name}'?", default=False):
             return

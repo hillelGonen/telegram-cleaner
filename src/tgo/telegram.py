@@ -1,3 +1,4 @@
+import contextlib
 import copy
 from collections.abc import AsyncIterator
 from datetime import datetime
@@ -5,22 +6,25 @@ from typing import Any, Self
 
 from telethon import TelegramClient, utils
 from telethon.tl.functions.account import UpdateNotifySettingsRequest
-from telethon.tl.functions.channels import GetFullChannelRequest
+from telethon.tl.functions.channels import LeaveChannelRequest
 from telethon.tl.functions.help import GetAppConfigRequest
 from telethon.tl.functions.messages import (
+    DeleteChatUserRequest,
+    DeleteHistoryRequest,
     GetDialogFiltersRequest,
-    GetFullChatRequest,
     UpdateDialogFilterRequest,
     UpdateDialogFiltersOrderRequest,
 )
 from telethon.tl.types import (
     Channel,
-    Chat as TlChat,
     DialogFilter,
     DialogFilterChatlist,
     InputNotifyPeer,
+    InputPeerChannel,
+    InputPeerChat,
     InputPeerNotifySettings,
     InputPeerSelf,
+    InputUserSelf,
     JsonArray,
     JsonObject,
     TextWithEntities,
@@ -88,10 +92,8 @@ class TelethonMapper:
             if isinstance(p, InputPeerSelf):
                 out.append(self_id)
                 continue
-            try:
+            with contextlib.suppress(TypeError, ValueError):  # unknown peer type: skip
                 out.append(utils.get_peer_id(p))
-            except (TypeError, ValueError):
-                pass  # unknown peer type, skip
         return out
 
     @classmethod
@@ -164,6 +166,7 @@ class TelegramGateway:
     def __init__(self, settings: Settings):
         api_id, api_hash = settings.require_api()
         settings.ensure_data_dir()
+        self._session_file = settings.session_path.with_suffix(".session")
         self._client = TelegramClient(
             str(settings.session_path),
             api_id,
@@ -171,11 +174,12 @@ class TelegramGateway:
             flood_sleep_threshold=FLOOD_SLEEP_THRESHOLD,
             device_model="tgo organizer",
         )
-        self._entities: dict[int, Any] = {}
         self._me: User | None = None
 
     async def __aenter__(self) -> Self:
         await self._client.connect()
+        if self._session_file.exists():  # created on first connect; full account access
+            self._session_file.chmod(0o600)
         return self
 
     async def __aexit__(self, *exc) -> None:
@@ -203,7 +207,6 @@ class TelegramGateway:
 
     async def chats(self, seen_at: datetime) -> AsyncIterator[Chat]:
         async for dialog in self._client.iter_dialogs():
-            self._entities[dialog.id] = dialog.entity
             yield TelethonMapper.chat(dialog, seen_at)
 
     async def raw_filters(self) -> list:
@@ -236,7 +239,21 @@ class TelegramGateway:
 
     async def leave_chat(self, chat_id: int) -> None:
         """Leave channel/group; for private chats delete the history (for you only)."""
-        await self._client.delete_dialog(await self.input_peer(chat_id), revoke=False)
+        peer = await self.input_peer(chat_id)
+        if isinstance(peer, InputPeerChannel):
+            await self._client(LeaveChannelRequest(peer))
+            return
+        if isinstance(peer, InputPeerChat):  # old-style small group
+            await self._client(DeleteChatUserRequest(peer.chat_id, InputUserSelf()))
+        await self.delete_history(peer)
+
+    async def delete_history(self, peer) -> None:
+        """Telegram deletes long histories in chunks; repeat until nothing is left.
+        (Telethon's delete_dialog sends one request, which can leave long chats behind.)"""
+        while True:
+            res = await self._client(DeleteHistoryRequest(peer, max_id=0, just_clear=False, revoke=False))
+            if not res.offset:
+                return
 
     async def set_archived(self, chat_id: int, archived: bool) -> None:
         await self._client.edit_folder(await self.input_peer(chat_id), folder=1 if archived else 0)
@@ -254,14 +271,3 @@ class TelegramGateway:
         res = await self._client(GetAppConfigRequest(hash=0))
         config = TelethonMapper.json_value(res.config) or {}
         return TelethonMapper.folder_limits(config, bool(me.premium))
-
-    async def chat_details(self, chat_id: int) -> tuple[str | None, int | None]:
-        """Description + member count of a channel/group (one request)."""
-        entity = self._entities.get(chat_id) or await self._client.get_entity(chat_id)
-        if isinstance(entity, Channel):
-            full = await self._client(GetFullChannelRequest(entity))
-            return full.full_chat.about or None, full.full_chat.participants_count
-        if isinstance(entity, TlChat):
-            full = await self._client(GetFullChatRequest(entity.id))
-            return full.full_chat.about or None, getattr(entity, "participants_count", None)
-        return None, None

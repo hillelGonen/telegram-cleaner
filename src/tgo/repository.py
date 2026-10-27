@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS chats (
     type          TEXT NOT NULL,
     title         TEXT NOT NULL,
     username      TEXT,
-    about         TEXT,
+    about         TEXT,                  -- unused (v1-v3)
     members       INTEGER,
     last_msg_date TEXT,
     unread        INTEGER NOT NULL DEFAULT 0,
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS chats (
     pinned        INTEGER NOT NULL DEFAULT 0,
     contact       INTEGER NOT NULL DEFAULT 0,
     creator       INTEGER NOT NULL DEFAULT 0,  -- you own this channel/group
-    details_fetched_at TEXT,
+    details_fetched_at TEXT,             -- unused (v1-v3)
     seen_at       TEXT NOT NULL
 );
 
@@ -33,23 +33,13 @@ CREATE TABLE IF NOT EXISTS folders (
     data     TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS assignments (
-    chat_id    INTEGER NOT NULL,
-    folder     TEXT NOT NULL,
-    source     TEXT NOT NULL,            -- rule | ai | manual
-    confidence REAL,
-    reason     TEXT,
-    status     TEXT NOT NULL DEFAULT 'proposed',  -- proposed | accepted | rejected
-    PRIMARY KEY (chat_id, folder)
-);
-
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
 """
 
-# Columns refreshed on every scan. about / details_fetched_at only change via save_details.
+# Columns refreshed on every scan.
 SCAN_COLS = (
     "type", "title", "username", "members", "last_msg_date",
     "unread", "muted", "archived", "pinned", "contact", "creator", "seen_at",
@@ -102,11 +92,7 @@ class Repository:
 
     def save_chats(self, chats: list[Chat]) -> None:
         cols = ("id", *SCAN_COLS)
-        updates = ", ".join(
-            # dialogs often lack member count; keep the one fetched with --full
-            f"{c}=COALESCE(excluded.{c}, chats.{c})" if c == "members" else f"{c}=excluded.{c}"
-            for c in SCAN_COLS
-        )
+        updates = ", ".join(f"{c}=excluded.{c}" for c in SCAN_COLS)
         self._conn.executemany(
             f"INSERT INTO chats ({', '.join(cols)}) VALUES ({', '.join(':' + c for c in cols)}) "
             f"ON CONFLICT(id) DO UPDATE SET {updates}",
@@ -126,14 +112,6 @@ class Repository:
                 row[k] = cls._iso(v)
         return row
 
-    def save_details(self, chat_id: int, about: str | None, members: int | None,
-                     fetched_at: datetime) -> None:
-        self._conn.execute(
-            "UPDATE chats SET about=?, members=COALESCE(?, members), details_fetched_at=? "
-            "WHERE id=?",
-            (about, members, self._iso(fetched_at), chat_id),
-        )
-
     def remove_unseen(self, seen_at: datetime) -> int:
         """Drop chats not seen in the given scan (left / deleted)."""
         cur = self._conn.execute("DELETE FROM chats WHERE seen_at != ?", (self._iso(seen_at),))
@@ -150,14 +128,6 @@ class Repository:
 
     def chats(self) -> list[Chat]:
         return [Chat.model_validate(dict(r)) for r in self._conn.execute("SELECT * FROM chats")]
-
-    def chats_missing_details(self) -> list[int]:
-        return [
-            r["id"] for r in self._conn.execute(
-                "SELECT id FROM chats WHERE type IN ('channel', 'group') "
-                "AND details_fetched_at IS NULL"
-            )
-        ]
 
     # folders
 

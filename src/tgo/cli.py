@@ -19,7 +19,7 @@ def _settings() -> Settings:
         return Settings()
     except ValidationError as e:
         console.print(f"[red]Bad configuration in .env:[/red]\n{e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 @app.callback(invoke_without_command=True)
@@ -33,7 +33,7 @@ def main(ctx: typer.Context):
         TgoApp(settings, QuestionaryPrompter(TerminalText(settings.bidi)), console).run()
     except ConfigError as e:
         console.print(f"[red]{e}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     except KeyboardInterrupt:
         console.print("\nBye.")
 
@@ -51,5 +51,5 @@ def logout():
         asyncio.run(go())
     except ConfigError as e:
         console.print(f"[red]{e}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     console.print("Logged out.")

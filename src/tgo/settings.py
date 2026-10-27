@@ -38,7 +38,12 @@ class Settings(BaseSettings):
         return self.data_dir / "actions.jsonl"
 
     def ensure_data_dir(self) -> Path:
+        """Create the data dir, owner-only: it holds the session (= full account access),
+        your chat list and the action log."""
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.data_dir.chmod(0o700)
+        for path in self.data_dir.rglob("*"):
+            path.chmod(0o700 if path.is_dir() else 0o600)
         return self.data_dir
 
     def require_api(self) -> tuple[int, str]:

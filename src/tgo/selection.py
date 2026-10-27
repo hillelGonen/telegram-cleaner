@@ -45,9 +45,7 @@ class ChatFilter(BaseModel):
             return False
         if self.muted is not None and chat.muted != self.muted:
             return False
-        if self.unread_min is not None and chat.unread < self.unread_min:
-            return False
-        return True
+        return self.unread_min is None or chat.unread >= self.unread_min
 
 
 class Protection(StrEnum):

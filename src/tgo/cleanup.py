@@ -101,9 +101,9 @@ class ActionLog:
         """Successful entries of the newest archive/mute batch that wasn't undone yet."""
         entries = self.entries()
         undone = {e.undo_of for e in entries if e.undo_of}
+        undoable = (CleanupAction.ARCHIVE, CleanupAction.MUTE)
         for e in reversed(entries):
-            if e.batch and e.ok and not e.undo_of and e.action in (CleanupAction.ARCHIVE, CleanupAction.MUTE) \
-                    and e.batch not in undone:
+            if e.batch and e.ok and not e.undo_of and e.action in undoable and e.batch not in undone:
                 return [x for x in entries if x.batch == e.batch and x.ok]
         return []
 

@@ -15,10 +15,3 @@ class FolderIndex:
 
     def in_no_folder(self, chat: Chat) -> bool:
         return not self.showing(chat)
-
-    def listing(self, chat: Chat) -> list[Folder]:
-        """Folders the chat was explicitly added to (ignores category flags)."""
-        return [f for f in self.folders if chat.id in f.listed]
-
-    def shown_count(self, folder: Folder) -> int:
-        return sum(1 for fs in self._shown.values() if folder in fs)

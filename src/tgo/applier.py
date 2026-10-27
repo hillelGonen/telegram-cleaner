@@ -111,7 +111,8 @@ class FolderEditor(FolderWriter):
         async def step():
             present = await self.peer_ids(live.include_peers) | await self.peer_ids(live.pinned_peers)
             adds = [await self.gw.input_peer(pid) for pid in chat_ids if pid not in present]
-            await self.gw.save_filter(live.id, TelethonMapper.with_peers(live, live.include_peers + adds, None))
+            updated = TelethonMapper.with_peers(live, live.include_peers + adds, None)
+            await self.gw.save_filter(live.id, updated)
         return step
 
 

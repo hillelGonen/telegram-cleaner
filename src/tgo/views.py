@@ -86,7 +86,8 @@ class ChatTableView(BaseView):
         dms = sum(1 for c in chats if c.type in (ChatType.USER, ChatType.BOT))
         self.console.print("[red]This can't be undone.[/red]")
         if private:
-            self.console.print(f"[red]{private} private channels/groups need a new invite link to rejoin.[/red]")
+            self.console.print(f"[red]{private} private channels/groups need a new invite link "
+                               "to rejoin.[/red]")
         if dms:
             self.console.print(f"[red]{dms} private chats/bots: history is deleted (for you only).[/red]")
 

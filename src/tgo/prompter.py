@@ -1,15 +1,13 @@
 from dataclasses import dataclass
-from typing import Any, Generic, Protocol, TypeVar
+from typing import Any, Protocol
 
 import questionary
 
 from tgo.text import TerminalText
 
-T = TypeVar("T")
-
 
 @dataclass
-class Option(Generic[T]):
+class Option[T]:
     label: str
     value: T
     checked: bool = False
@@ -18,8 +16,8 @@ class Option(Generic[T]):
 class Prompter(Protocol):
     """User questions. Every method returns None when the user cancels (Ctrl+C / Esc)."""
 
-    def select(self, message: str, options: list[Option[T]]) -> T | None: ...
-    def checkbox(self, message: str, options: list[Option[T]]) -> list[T] | None: ...
+    def select[T](self, message: str, options: list[Option[T]]) -> T | None: ...
+    def checkbox[T](self, message: str, options: list[Option[T]]) -> list[T] | None: ...
     def text(self, message: str, default: str = "") -> str | None: ...
     def confirm(self, message: str, default: bool = False) -> bool | None: ...
 
