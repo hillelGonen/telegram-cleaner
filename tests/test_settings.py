@@ -2,7 +2,7 @@ import stat
 
 import pytest
 
-from tgo.settings import ConfigError, Settings, _default_data_dir, save_credentials
+from tgo.settings import ConfigError, Settings, _default_data_dir, save_credentials, save_env
 
 HASH = "0123456789abcdef0123456789abcdef"
 
@@ -44,3 +44,15 @@ def test_default_data_dir(home, tmp_path):
     (tmp_path / "data").mkdir()
     (tmp_path / "data" / "tgo.db").write_text("")
     assert str(_default_data_dir()) == "data"  # existing checkout keeps ./data
+
+
+def test_bidi_setting_unset_means_ask_then_reorder(home, tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("")
+    s = Settings(_env_file=env)
+    assert s.bidi is None and s.reorder_rtl is True
+    path = save_env(TGO_BIDI="false")
+    s = Settings(_env_file=path)
+    assert s.bidi is False and s.reorder_rtl is False
+    save_env(TGO_BIDI="true")  # replaces, doesn't duplicate
+    assert path.read_text().count("TGO_BIDI") == 1

@@ -153,7 +153,7 @@ def test_overview(make_app):
     app = make_app()
     app.overview()
     out = app.console.export_text()
-    assert "Dead" in out and "Folders 2/10" in out
+    assert "Dead" in out and "Folders (2 of 10 used)" in out
 
 
 def test_not_reading_leave_includes_muted(make_app, gw):

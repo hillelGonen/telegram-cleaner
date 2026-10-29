@@ -33,9 +33,13 @@ class Settings(BaseSettings):
     tg_api_id: int | None = None
     tg_api_hash: SecretStr | None = None
     data_dir: Path = Field(default_factory=_default_data_dir, validation_alias="TGO_DATA_DIR")
-    # Reorder RTL text (Hebrew/Arabic) for terminals without bidi support.
-    # Set TGO_BIDI=false if your terminal already renders RTL correctly.
-    bidi: bool = Field(True, validation_alias="TGO_BIDI")
+    # Reorder RTL text (Hebrew/Arabic) ourselves: true for terminals without bidi support,
+    # false for terminals that do it themselves. None = not asked yet (first run asks).
+    bidi: bool | None = Field(None, validation_alias="TGO_BIDI")
+
+    @property
+    def reorder_rtl(self) -> bool:
+        return True if self.bidi is None else self.bidi
 
     @property
     def session_path(self) -> Path:
@@ -76,10 +80,8 @@ class Settings(BaseSettings):
 API_HASH_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
-def save_credentials(api_id: int, api_hash: str) -> Path:
-    """Write the API id/hash to ~/.tgo/.env (owner-only), keeping any other lines."""
-    if not API_HASH_RE.match(api_hash):
-        raise ValueError("api_hash must be 32 hex characters")
+def save_env(**values: str) -> Path:
+    """Set KEY=value lines in ~/.tgo/.env (owner-only), keeping all other lines."""
     home = home_dir()
     home.mkdir(parents=True, exist_ok=True)
     home.chmod(0o700)
@@ -87,8 +89,14 @@ def save_credentials(api_id: int, api_hash: str) -> Path:
     keep = []
     if path.exists():
         keep = [line for line in path.read_text(encoding="utf-8").splitlines()
-                if not line.startswith(("TG_API_ID=", "TG_API_HASH="))]
-    path.write_text("\n".join([*keep, f"TG_API_ID={api_id}", f"TG_API_HASH={api_hash}"]) + "\n",
+                if line.split("=", 1)[0] not in values]
+    path.write_text("\n".join([*keep, *(f"{k}={v}" for k, v in values.items())]) + "\n",
                     encoding="utf-8")
     path.chmod(0o600)
     return path
+
+
+def save_credentials(api_id: int, api_hash: str) -> Path:
+    if not API_HASH_RE.match(api_hash):
+        raise ValueError("api_hash must be 32 hex characters")
+    return save_env(TG_API_ID=str(api_id), TG_API_HASH=api_hash)

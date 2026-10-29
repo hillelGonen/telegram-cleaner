@@ -8,9 +8,9 @@ from rich.console import Console
 
 from tgo.menu import TgoApp
 from tgo.prompter import QuestionaryPrompter
-from tgo.settings import API_HASH_RE, ConfigError, Settings, save_credentials
+from tgo.settings import API_HASH_RE, ConfigError, Settings, save_credentials, save_env
 from tgo.telegram import TelegramGateway
-from tgo.text import TerminalText
+from tgo.text import LRM, TerminalText
 
 app = typer.Typer(help="Tidy up your Telegram: run `tgo` for the menu.", add_completion=False)
 console = Console()
@@ -46,6 +46,27 @@ def _first_run_setup() -> bool:
     return True
 
 
+SAMPLE = "שלום עולם"  # "hello world"; reversed it reads "םלוע םולש"
+
+
+def _ask_rtl() -> bool | None:
+    """Show Hebrew both ways; the one that reads right tells whether to reorder ourselves."""
+    console.print("\n[bold]One question so Hebrew/Arabic names show correctly in this terminal[/bold]")
+    reorder = questionary.select(
+        "Which line reads correctly (right to left: shalom olam)?",
+        choices=[questionary.Choice(LRM + SAMPLE, value=False),
+                 questionary.Choice(LRM + TerminalText(bidi=True).plain(SAMPLE)[1:-1], value=True),
+                 questionary.Choice("I don't read Hebrew/Arabic - skip", value="skip")],
+    ).ask()
+    if reorder is None:
+        return None
+    if reorder == "skip":
+        reorder = True
+    path = save_env(TGO_BIDI=str(reorder).lower())
+    console.print(f"[dim]Saved to {path}. Change it later with TGO_BIDI=true/false.[/dim]\n")
+    return reorder
+
+
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context):
     """Open the menu."""
@@ -60,7 +81,10 @@ def main(ctx: typer.Context):
                 raise
             settings = _settings()
             settings.require_api()
-        TgoApp(settings, QuestionaryPrompter(TerminalText(settings.bidi)), console).run()
+        if settings.bidi is None and sys.stdin.isatty():
+            settings.bidi = _ask_rtl()
+        bidi = settings.reorder_rtl
+        TgoApp(settings, QuestionaryPrompter(TerminalText(bidi)), console).run()
     except ConfigError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1) from None

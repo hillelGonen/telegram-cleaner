@@ -41,8 +41,14 @@ def test_options(scan_time):
 
 
 def test_terminal_text_bidi():
-    assert TerminalText(bidi=True).plain("חדשות 12") == "12 תושדח"
-    assert TerminalText(bidi=False).plain("חדשות 12") == "חדשות 12"
-    assert TerminalText(bidi=True).plain("חדשות (12)") == "(12) תושדח"  # brackets mirrored
-    assert TerminalText(bidi=True).plain("News") == "News"
+    lrm = "\u200e"
+    assert TerminalText(bidi=True).plain("חדשות 12") == lrm + "12 תושדח" + lrm  # we reorder
+    assert TerminalText(bidi=False).plain("חדשות 12") == lrm + "חדשות 12" + lrm  # terminal does
+    assert TerminalText(bidi=True).plain("חדשות (12)") == lrm + "(12) תושדח" + lrm  # mirrored
+    assert TerminalText(bidi=True).plain("News") == "News"  # no mark on plain text
     assert TerminalText()("[x]") == r"\[x]"  # rich markup escaped
+
+
+def test_rtl_mark_keeps_table_width():
+    from rich.cells import cell_len
+    assert cell_len(TerminalText(bidi=False).plain("חדשות")) == 5

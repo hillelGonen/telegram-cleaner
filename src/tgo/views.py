@@ -3,6 +3,7 @@ from datetime import datetime
 
 from rich.console import Console
 from rich.markup import escape
+from rich.padding import Padding
 from rich.table import Table
 
 from tgo.applier import RestorePreview, WriteResult
@@ -52,12 +53,13 @@ class OverviewView(BaseView):
 
         limit = limits.folders if limits else 10
         per = limits.chats_per_folder if limits else 100
-        ft = Table(title=f"Folders {len(index.folders)}/{limit}", title_justify="left")
+        self.console.print(f"\n[bold]Folders[/bold] [dim]({len(index.folders)} of {limit} used)[/dim]")
+        ft = Table()
         ft.add_column("Folder")
         ft.add_column("Chats", justify="right")
         for f in index.folders:
             ft.add_row(self.t(f.label), f"{len(f.listed)}/{per}")
-        self.console.print(ft)
+        self.console.print(Padding(ft, (0, 0, 0, 2)))  # line up with the counts above
 
 
 class ChatTableView(BaseView):

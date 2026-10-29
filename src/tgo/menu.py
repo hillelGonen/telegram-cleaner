@@ -55,7 +55,7 @@ class TgoApp:
         self.settings = settings
         self.ask = prompter
         self.console = console
-        self.text = TerminalText(bidi=settings.bidi)
+        self.text = TerminalText(bidi=settings.reorder_rtl)
         self.gateway_factory = gateway_factory or (lambda: TelegramGateway(settings))
         self.sleep = sleep
         self.store = BackupStore(settings.backups_dir)
