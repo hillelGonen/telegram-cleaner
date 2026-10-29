@@ -45,8 +45,9 @@ VERBS = {CleanupAction.LEAVE: "Leave / delete", CleanupAction.ARCHIVE: "Archive"
 
 
 class TgoApp:
-    """The interactive menu. Sync on the outside (prompts); each Telegram job runs in its own
-    short asyncio loop, because the prompt library can't run inside a running loop."""
+    """The interactive menu. Sync on the outside (prompts); Telegram jobs run on one private
+    asyncio loop that is only running during a job, because the prompt library starts its own
+    loop. The Telegram connection is opened once and reused for the whole session."""
 
     def __init__(self, settings: Settings, prompter: Prompter, console: Console,
                  gateway_factory: Callable[[], Any] | None = None,
@@ -62,6 +63,8 @@ class TgoApp:
         self.chats_view = ChatTableView(console, self.text)
         self.result_view = ResultView(console, self.text)
         settings.ensure_data_dir()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._tg: Any = None
 
     # plumbing
 
@@ -69,11 +72,25 @@ class TgoApp:
         return Repository(self.settings.db_path)
 
     def telegram(self, work: Callable[[Any], Awaitable[T]]) -> T:
+        """Run a job on the shared connection (connects on first use)."""
         async def go():
-            async with self.gateway_factory() as tg:
-                await tg.ensure_authorized()
-                return await work(tg)
-        return asyncio.run(go())
+            if self._tg is None:
+                tg = self.gateway_factory()
+                await tg.__aenter__()
+                self._tg = tg
+            return await work(self._tg)
+        if self._loop is None:
+            self._loop = asyncio.new_event_loop()
+        return self._loop.run_until_complete(go())
+
+    def close(self) -> None:
+        if self._loop is None:
+            return
+        if self._tg is not None:
+            self._loop.run_until_complete(self._tg.__aexit__(None, None, None))
+            self._tg = None
+        self._loop.close()
+        self._loop = None
 
     async def _save_folders(self, tg) -> None:
         folders = await tg.folders()
@@ -88,6 +105,12 @@ class TgoApp:
     # entry
 
     def run(self) -> None:
+        try:
+            self._menu()
+        finally:
+            self.close()
+
+    def _menu(self) -> None:
         self.ensure_login()
         self.ensure_fresh()
         menu = [
@@ -107,13 +130,12 @@ class TgoApp:
             screen()
 
     def ensure_login(self) -> None:
-        async def check():
-            async with self.gateway_factory() as tg:
-                if not await tg.is_authorized():
-                    self.console.print("[bold]Log in to Telegram[/bold] (phone, code, 2FA password if set)")
-                    me = await tg.login()
-                    self.console.print(f"[green]Logged in as {self.text(me.first_name)}[/green]")
-        asyncio.run(check())
+        async def check(tg):
+            if not await tg.is_authorized():
+                self.console.print("[bold]Log in to Telegram[/bold] (phone, code, 2FA password if set)")
+                me = await tg.login()
+                self.console.print(f"[green]Logged in as {self.text(me.first_name)}[/green]")
+        self.telegram(check)
 
     def ensure_fresh(self, force: bool = False) -> None:
         with self.repo() as repo:
@@ -283,7 +305,7 @@ class TgoApp:
                 repo.commit()
 
             async def work(tg):
-                executor = CleanupExecutor(tg, self.log, self.sleep)
+                executor = CleanupExecutor(tg, self.log)
                 return await executor.run(action, chats, lambda c: self.result_view.step(action, c),
                                           save, undo_of=undo_of)
             try:

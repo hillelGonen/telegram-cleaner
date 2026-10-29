@@ -258,6 +258,11 @@ class TelegramGateway:
     async def set_archived(self, chat_id: int, archived: bool) -> None:
         await self._client.edit_folder(await self.input_peer(chat_id), folder=1 if archived else 0)
 
+    async def set_archived_many(self, chat_ids: list[int], archived: bool) -> None:
+        """One request for many chats (Telegram accepts a list)."""
+        peers = [await self.input_peer(i) for i in chat_ids]
+        await self._client.edit_folder(peers, folder=1 if archived else 0)
+
     async def set_muted(self, chat_id: int, muted: bool) -> None:
         settings = InputPeerNotifySettings(mute_until=MUTE_FOREVER if muted else 0)
         peer = InputNotifyPeer(await self.input_peer(chat_id))

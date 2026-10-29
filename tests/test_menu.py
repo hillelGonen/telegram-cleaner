@@ -44,11 +44,16 @@ def make_app(tmp_path, gw):
         repo.self_id = SELF_ID
         repo.commit()
 
+    apps = []
+
     def make(*answers):
         app = TgoApp(settings, FakePrompter(*answers), Console(record=True, width=140),
                      gateway_factory=lambda: gw, sleep=no_sleep)
+        apps.append(app)
         return app
-    return make
+    yield make
+    for app in apps:
+        app.close()
 
 
 def chats_in_db(app) -> dict[int, object]:
@@ -86,7 +91,7 @@ def test_clean_any_age_needs_extra_confirm(make_app, gw):
     make_app(["Private chats"], "Any age", False).clean_old()
     assert gw.calls == []
     make_app(["Private chats"], "Any age", True, "Archive", "All", True).clean_old()
-    assert sorted(gw.calls) == [("archive", 20), ("archive", 21)]
+    assert [(c[0], set(c[1])) for c in gw.calls] == [("archive_many", {20, 21})]
 
 
 def test_not_reading_mutes_unmuted_only(make_app, gw):
@@ -133,7 +138,7 @@ def test_undo_archive_batch(make_app, gw):
     gw.calls.clear()
     app = make_app("Undo last archive", True)
     app.undo()
-    assert gw.calls == [("unarchive", 20)]
+    assert gw.calls == [("unarchive_many", (20,))]
     assert not chats_in_db(app)[20].archived
 
 
@@ -161,4 +166,15 @@ def test_not_reading_leave_includes_muted(make_app, gw):
 def test_clean_old_all_types(make_app, gw):
     make_app(["All types"], "1 year", "Archive", "All", True).clean_old()
     # old channel, group and private chat; Me protected; active ones not old
-    assert set(gw.calls) == {("archive", marked(2)), ("archive", marked(7)), ("archive", 20)}
+    assert [set(c[1]) for c in gw.calls] == [{marked(2), marked(7), 20}]
+
+
+def test_one_connection_for_the_whole_session(make_app, gw):
+    app = make_app(["Groups"], "1 year", "Mute", "All", True,
+                   ["Private chats"], "1 year", "Mute", "All", True)
+    app.clean_old()
+    asyncio.run(asyncio.sleep(0))  # the prompt library runs its own loop between screens
+    app.clean_old()
+    assert gw.connects == 1 and len(gw.calls) == 2
+    app.close()
+    assert gw.connects == 0

@@ -38,7 +38,7 @@ class WriteResult(BaseModel):
 class FolderWriter:
     """Shared plumbing: live state, peer ids, backups, paced writes."""
 
-    WRITE_DELAY = 1.0  # seconds between folder writes, keeps clear of flood limits
+    WRITE_DELAY = 0.3  # seconds between folder writes, keeps clear of flood limits
 
     def __init__(self, gateway: FolderGateway, store: BackupStore,
                  sleep: Callable[[float], Awaitable[None]] = asyncio.sleep):

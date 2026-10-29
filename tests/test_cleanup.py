@@ -68,23 +68,22 @@ def test_filter_validation():
 
 # executor + log
 
-async def no_sleep(_):
-    pass
-
-
 def run(executor, action, chats, **kw):
     return asyncio.run(executor.run(action, chats, **kw))
 
 
-@pytest.mark.parametrize("action,call", [
-    (CleanupAction.LEAVE, "leave"), (CleanupAction.ARCHIVE, "archive"),
-    (CleanupAction.UNARCHIVE, "unarchive"), (CleanupAction.MUTE, "mute"),
-    (CleanupAction.UNMUTE, "unmute"), (CleanupAction.READ, "read"),
+@pytest.mark.parametrize("action,calls", [
+    (CleanupAction.LEAVE, [("leave", 1), ("leave", 2)]),
+    (CleanupAction.MUTE, [("mute", 1), ("mute", 2)]),
+    (CleanupAction.UNMUTE, [("unmute", 1), ("unmute", 2)]),
+    (CleanupAction.READ, [("read", 1), ("read", 2)]),
+    (CleanupAction.ARCHIVE, [("archive_many", (1, 2))]),  # one request for many chats
+    (CleanupAction.UNARCHIVE, [("unarchive_many", (1, 2))]),
 ])
-def test_executor_dispatch(tmp_path, action, call):
+def test_executor_dispatch(tmp_path, action, calls):
     gw = FakeGateway()
-    result = run(CleanupExecutor(gw, ActionLog(tmp_path / "a.jsonl"), no_sleep), action, CHATS[:2])
-    assert gw.calls == [(call, 1), (call, 2)]
+    result = run(CleanupExecutor(gw, ActionLog(tmp_path / "a.jsonl")), action, CHATS[:2])
+    assert sorted(gw.calls) == sorted(calls)
     assert [c.id for c in result.done] == [1, 2]
 
 
@@ -92,45 +91,56 @@ def test_executor_continues_on_error_and_logs(tmp_path):
     log = ActionLog(tmp_path / "a.jsonl")
     gw = FakeGateway()
     gw.fail["leave 2"] = rpc_error("CHANNEL_PRIVATE")
-    result = run(CleanupExecutor(gw, log, no_sleep), CleanupAction.LEAVE, CHATS[:3])
+    result = run(CleanupExecutor(gw, log), CleanupAction.LEAVE, CHATS[:3])
     assert [c.id for c in result.done] == [1, 3]
     assert "CHANNEL_PRIVATE" in result.failed[0].error
     entries = log.entries()
-    assert [(e.chat_id, e.ok) for e in entries] == [(1, True), (2, False), (3, True)]
+    assert sorted((e.chat_id, e.ok) for e in entries) == [(1, True), (2, False), (3, True)]
     assert {e.batch for e in entries} == {result.batch}
-    assert entries[0].link == "https://t.me/oldmov" and entries[1].link is None
-    assert [e.chat_id for e in log.left()] == [3, 1]  # newest first, ok only
+    links = {e.chat_id: e.link for e in entries}
+    assert links[1] == "https://t.me/oldmov" and links[2] is None
+    assert sorted(e.chat_id for e in log.left()) == [1, 3]  # ok only
 
 
 def test_executor_stops_on_flood_wait(tmp_path):
     gw = FakeGateway()
     gw.fail["leave 2"] = FloodWaitError(None, capture=600)
-    result = run(CleanupExecutor(gw, ActionLog(tmp_path / "a.jsonl"), no_sleep),
-                 CleanupAction.LEAVE, CHATS[:3])
+    result = run(CleanupExecutor(gw, ActionLog(tmp_path / "a.jsonl")),
+                 CleanupAction.LEAVE, CHATS[:5], concurrency=1)
     assert [c.id for c in result.done] == [1]
-    assert [c.id for c in result.skipped] == [2, 3]
+    assert [c.id for c in result.skipped] == [2, 3, 4, 5]
     assert "600" in result.stopped
 
 
-def test_pacing_and_progress_callback(tmp_path):
-    sleeps, saved = [], []
+def test_parallel_with_limit_and_progress_callback(tmp_path):
+    gw = FakeGateway()
+    saved = []
+    many = [make_chat(i, idle_days=1) for i in range(100, 120)]
+    result = run(CleanupExecutor(gw, ActionLog(tmp_path / "a.jsonl")), CleanupAction.LEAVE, many,
+                 on_done=lambda c: saved.append(c.id))
+    assert 1 < gw.max_in_flight <= CleanupAction.LEAVE.concurrency
+    assert sorted(saved) == [c.id for c in many]
+    assert [c.id for c in result.done] == [c.id for c in many]  # reported in input order
 
-    async def record(seconds):
-        sleeps.append(seconds)
 
-    ex = CleanupExecutor(FakeGateway(), ActionLog(tmp_path / "a.jsonl"), record)
-    chats = [CHATS[0], CHATS[5], CHATS[2]]  # channel, user, group
-    run(ex, CleanupAction.LEAVE, chats, on_done=lambda c: saved.append(c.id))
-    assert sleeps == [1.0, 0.3]  # pace by the chat just handled; no sleep after the last
-    assert saved == [1, 6, 3]
-    sleeps.clear()
-    run(ex, CleanupAction.LEAVE, chats, delay=0)
-    assert sleeps == [0, 0]
+def test_archive_batches_and_falls_back_per_chat(tmp_path):
+    log = ActionLog(tmp_path / "a.jsonl")
+    many = [make_chat(i, idle_days=1) for i in range(1, 251)]
+    gw = FakeGateway()
+    ex = CleanupExecutor(gw, log)
+    run(ex, CleanupAction.ARCHIVE, many)
+    assert [len(c[1]) for c in gw.calls] == [100, 100, 50]
+
+    gw = FakeGateway()
+    gw.fail["archive_many"] = rpc_error("PEER_ID_INVALID")
+    gw.fail["archive 2"] = rpc_error("PEER_ID_INVALID")
+    result = run(CleanupExecutor(gw, log), CleanupAction.ARCHIVE, many[:3])
+    assert [c.id for c in result.done] == [1, 3] and result.failed[0].chat.id == 2
 
 
 def test_last_undoable_batch(tmp_path):
     log = ActionLog(tmp_path / "a.jsonl")
-    ex = CleanupExecutor(FakeGateway(), log, no_sleep)
+    ex = CleanupExecutor(FakeGateway(), log)
     assert log.last_undoable_batch() == []
     archived = run(ex, CleanupAction.ARCHIVE, CHATS[:2])
     run(ex, CleanupAction.LEAVE, CHATS[2:3])  # not undoable, doesn't hide the archive batch

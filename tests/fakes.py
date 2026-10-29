@@ -1,4 +1,6 @@
 """Fake Telegram + fake prompter for tests. Folders are real TL objects."""
+import asyncio
+
 from telethon import utils
 from telethon.errors import RPCError
 from telethon.tl.types import (
@@ -46,12 +48,15 @@ class FakeGateway:
         self.filters = filters if filters is not None else live_filters()
         self.calls: list[tuple] = []
         self.fail: dict[str, Exception] = {}
+        self.connects = 0
+        self.in_flight = self.max_in_flight = 0
 
     async def __aenter__(self):
+        self.connects += 1
         return self
 
     async def __aexit__(self, *exc):
-        pass
+        self.connects -= 1
 
     async def is_authorized(self):
         return True
@@ -104,10 +109,19 @@ class FakeGateway:
     # chat actions
 
     async def leave_chat(self, chat_id):
-        self._record("leave", chat_id)
+        self.in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        try:
+            await asyncio.sleep(0)  # let other tasks start, like a network call would
+            self._record("leave", chat_id)
+        finally:
+            self.in_flight -= 1
 
     async def set_archived(self, chat_id, archived):
         self._record("archive" if archived else "unarchive", chat_id)
+
+    async def set_archived_many(self, chat_ids, archived):
+        self._record("archive_many" if archived else "unarchive_many", tuple(chat_ids))
 
     async def set_muted(self, chat_id, muted):
         self._record("mute" if muted else "unmute", chat_id)

@@ -24,12 +24,11 @@ class CleanupAction(StrEnum):
     def irreversible(self) -> bool:
         return self == CleanupAction.LEAVE
 
-    def delay(self, chat: Chat) -> float:
-        """Default seconds between chats. Leaving channels/groups is limited hardest by Telegram;
-        if we still go too fast, Telethon sleeps through short flood waits by itself."""
-        if self == CleanupAction.LEAVE and chat.type in (ChatType.CHANNEL, ChatType.GROUP):
-            return 1.0
-        return 0.3
+    @property
+    def concurrency(self) -> int:
+        """Chats handled at the same time. Telegram limits leaving hardest; when we still go
+        too fast it answers with a flood wait, which Telethon sleeps through by itself."""
+        return 3 if self == CleanupAction.LEAVE else 8
 
     @property
     def local_update(self) -> dict[str, Any] | None:
@@ -62,6 +61,7 @@ class CleanupAction(StrEnum):
 class ActionGateway(Protocol):
     async def leave_chat(self, chat_id: int) -> None: ...
     async def set_archived(self, chat_id: int, archived: bool) -> None: ...
+    async def set_archived_many(self, chat_ids: list[int], archived: bool) -> None: ...
     async def set_muted(self, chat_id: int, muted: bool) -> None: ...
     async def mark_read(self, chat_id: int) -> None: ...
 
@@ -127,14 +127,15 @@ class CleanupResult(BaseModel):
 
 
 class CleanupExecutor:
-    """Runs one action over chats, paced, logging each one. Per-chat errors don't stop the run;
+    """Runs one action over chats, several at a time, logging each one. Archiving goes in
+    batches of up to ARCHIVE_BATCH chats per request. Per-chat errors don't stop the run;
     a long flood wait does."""
 
-    def __init__(self, gateway: ActionGateway, log: ActionLog,
-                 sleep: Callable[[float], Awaitable[None]] = asyncio.sleep):
+    ARCHIVE_BATCH = 100
+
+    def __init__(self, gateway: ActionGateway, log: ActionLog):
         self.gw = gateway
         self.log = log
-        self.sleep = sleep
 
     def _call(self, action: CleanupAction, chat_id: int) -> Awaitable[None]:
         match action:
@@ -150,30 +151,87 @@ class CleanupExecutor:
     async def run(self, action: CleanupAction, chats: list[Chat],
                   on_step: Callable[[Chat], None] = lambda _: None,
                   on_done: Callable[[Chat], None] = lambda _: None,
-                  delay: float | None = None, undo_of: str | None = None) -> CleanupResult:
-        """on_done runs after each successful chat (save progress); delay overrides pacing."""
-        result = CleanupResult(action=action, batch=uuid.uuid4().hex[:12])
-        for i, chat in enumerate(chats):
-            on_step(chat)
-            error = None
+                  undo_of: str | None = None, concurrency: int | None = None) -> CleanupResult:
+        """on_done runs after each successful chat (save progress)."""
+        run = _Run(self, action, on_step, on_done, undo_of)
+        if action in (CleanupAction.ARCHIVE, CleanupAction.UNARCHIVE):
+            await run.archive_batches(chats, self.ARCHIVE_BATCH, concurrency or action.concurrency)
+        else:
+            await run.parallel(chats, concurrency or action.concurrency)
+        return run.finish(chats)
+
+
+class _Run:
+    """State of one executor run."""
+
+    def __init__(self, ex: CleanupExecutor, action: CleanupAction, on_step, on_done, undo_of):
+        self.ex = ex
+        self.action = action
+        self.on_step = on_step
+        self.on_done = on_done
+        self.undo_of = undo_of
+        self.result = CleanupResult(action=action, batch=uuid.uuid4().hex[:12])
+
+    def _record(self, chat: Chat, error: str | None) -> None:
+        self.ex.log.append(ActionLogEntry(
+            at=utcnow(), action=self.action, chat_id=chat.id, title=chat.title, type=chat.type,
+            username=chat.username, link=chat.link, ok=error is None, error=error,
+            batch=self.result.batch, undo_of=self.undo_of,
+        ))
+        if error:
+            self.result.failed.append(FailedChat(chat=chat, error=error))
+        else:
+            self.result.done.append(chat)
+            self.on_done(chat)
+
+    def _stop(self, e: FloodWaitError) -> None:
+        if not self.result.stopped:
+            self.result.stopped = f"Telegram asked to wait {e.seconds}s; stopped. Try again later."
+
+    async def parallel(self, chats: list[Chat], concurrency: int) -> None:
+        sem = asyncio.Semaphore(concurrency)
+
+        async def one(chat: Chat) -> None:
+            async with sem:
+                if self.result.stopped:
+                    return
+                self.on_step(chat)
+                try:
+                    await self.ex._call(self.action, chat.id)
+                except FloodWaitError as e:
+                    self._stop(e)
+                    return
+                except (RPCError, ValueError) as e:  # ValueError: chat not in session cache
+                    self._record(chat, f"{type(e).__name__}: {e}")
+                else:
+                    self._record(chat, None)
+
+        await asyncio.gather(*(one(c) for c in chats))
+
+    async def archive_batches(self, chats: list[Chat], size: int, concurrency: int) -> None:
+        archived = self.action == CleanupAction.ARCHIVE
+        for i in range(0, len(chats), size):
+            chunk = chats[i:i + size]
+            if self.result.stopped:
+                return
+            for chat in chunk:
+                self.on_step(chat)
             try:
-                await self._call(action, chat.id)
+                await self.ex.gw.set_archived_many([c.id for c in chunk], archived)
             except FloodWaitError as e:
-                result.stopped = f"Telegram asked to wait {e.seconds}s; stopped. Try again later."
-                result.skipped = chats[i:]
-                return result
-            except (RPCError, ValueError) as e:  # ValueError: chat not in session cache
-                error = f"{type(e).__name__}: {e}"
-            self.log.append(ActionLogEntry(
-                at=utcnow(), action=action, chat_id=chat.id, title=chat.title, type=chat.type,
-                username=chat.username, link=chat.link, ok=error is None, error=error,
-                batch=result.batch, undo_of=undo_of,
-            ))
-            if error:
-                result.failed.append(FailedChat(chat=chat, error=error))
+                self._stop(e)
+                return
+            except (RPCError, ValueError):
+                await self.parallel(chunk, concurrency)  # one by one, to find the bad chat
             else:
-                result.done.append(chat)
-                on_done(chat)
-            if i < len(chats) - 1:
-                await self.sleep(action.delay(chat) if delay is None else delay)
-        return result
+                for chat in chunk:
+                    self._record(chat, None)
+
+    def finish(self, chats: list[Chat]) -> CleanupResult:
+        r = self.result
+        order = {c.id: i for i, c in enumerate(chats)}
+        r.done.sort(key=lambda c: order[c.id])
+        r.failed.sort(key=lambda f: order[f.chat.id])
+        handled = {c.id for c in r.done} | {f.chat.id for f in r.failed}
+        r.skipped = [c for c in chats if c.id not in handled] if r.stopped else []
+        return r
