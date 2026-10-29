@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3  # no major-version tag is published
       - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run pytest -q
