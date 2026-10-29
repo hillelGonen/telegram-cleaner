@@ -5,6 +5,8 @@ description = "Clean up your Telegram from the terminal: leave dead chats, quiet
 authors = [
     { name = "hillelGonen" }
 ]
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.14.1",

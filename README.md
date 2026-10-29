@@ -5,16 +5,21 @@
 A small menu that helps you clean up and organize Telegram: delete old chats, leave dead groups,
 quiet noisy channels, and sort channels into folders.
 
-## Setup (once)
-1. Get `api_id` + `api_hash` at https://my.telegram.org → "API development tools".
-2. `cp .env.example .env` and fill `TG_API_ID`, `TG_API_HASH`.
-3. `uv sync`
+## Install
+Needs [uv](https://docs.astral.sh/uv/getting-started/installation/).
+```
+uv tool install git+https://github.com/hillelGonen/telegram-cleaner
+tgo
+```
+On first run `tgo` asks for your Telegram API id and hash (get them at https://my.telegram.org →
+"API development tools") and saves them to `~/.tgo/.env`. Your login and data live in `~/.tgo/`,
+readable only by you. `~/.tgo/data/tgo.session` gives full access to your account; never share it.
 
-`data/tgo.session` gives full access to your account. Keep it private; it is gitignored.
+Update: `uv tool upgrade tgo` · Remove: `uv tool uninstall tgo` (then delete `~/.tgo`).
 
 ## Use
 ```
-uv run tgo
+tgo
 ```
 First time it asks you to log in (phone, code from Telegram, 2FA password if set).
 It reads your chats (again whenever the last read is over an hour old), then shows:
@@ -31,7 +36,7 @@ It reads your chats (again whenever the last read is over an hour old), then sho
 Every action shows the list first. You can take all, untick some, or cancel, and then confirm
 with y/N. Nothing happens before that.
 
-Other command: `uv run tgo logout`.
+Other command: `tgo logout`.
 
 ## Safety
 - Never touched: chats/groups you own, pinned chats, Saved Messages, Telegram's service chat.
@@ -70,7 +75,13 @@ src/tgo/
 
 ## Development
 ```
+git clone https://github.com/hillelGonen/telegram-cleaner && cd telegram-cleaner
+uv sync
+uv run tgo           # run from the checkout (uses ./data if it exists, else ~/.tgo/data)
 uv run pytest        # tests (no Telegram account needed; Telegram is faked)
 uv run ruff check .  # lint
 ```
 CI runs both on every push.
+
+## License
+MIT, see [LICENSE](LICENSE).
