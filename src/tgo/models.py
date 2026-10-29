@@ -79,6 +79,11 @@ class FolderFlags(BaseModel):
             or (self.exclude_read and chat.unread == 0)
         )
 
+    @property
+    def has_type_rules(self) -> bool:
+        """Shows chats by type ("all channels"...), so the folder is valid without listed chats."""
+        return any((self.contacts, self.non_contacts, self.groups, self.broadcasts, self.bots))
+
     def active(self) -> list[str]:
         return [name for name, on in self if on]
 

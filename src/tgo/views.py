@@ -110,7 +110,11 @@ class ResultView(BaseView):
             self.console.print(f"[yellow]{r.stopped}[/yellow]")
 
     def folder_write(self, r: WriteResult) -> None:
-        if r.ok:
+        if r.problems:
+            for p in r.problems:
+                self.console.print(f"[red]✗ {self.t(p)}[/red]")
+            self.console.print("Nothing was changed.")
+        elif r.ok:
             self.console.print("[green]Done.[/green] [dim](undo from the Undo menu)[/dim]")
         else:
             self.console.print(f"[red]Failed: {escape(r.error or '')}[/red] Nothing else was changed.")

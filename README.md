@@ -33,9 +33,13 @@ It reads your chats (again whenever the last read is over an hour old), then sho
 | 📊 Overview | Counts: channels, groups, private chats, bots; dead (1y+), noisy (1000+ unread), in no folder; folders |
 | 🧹 Clean up old chats | Pick types (or All types) + age (1 month … 2 years) → delete/leave, archive or mute |
 | 📭 Channels & groups I don't read | 50 / 100 / 300 / 1000+ unread (they still post, you don't read) → leave, mute, archive or mark read |
-| 📁 Sort into folders | Pick a folder (or make one), type words like `news חדשות أخبار` → matching channels are added |
+| 📁 Sort into folders | **In your browser (recommended):** drag channels, groups and bots between folders, make new folders, then Save. Or in the terminal: pick a folder and type words like `news חדשות أخبار` |
 | ↩️ Undo | Undo the last folder change or last archive/mute; list chats you left with rejoin links |
 | 🔄 Rescan now | Read your chats again |
+
+The browser sorter runs only on your computer (`127.0.0.1`, a random port and a secret link),
+so no website can reach it. It writes to Telegram only when you click Save, after showing what
+will change, and saves a backup first, so Undo can put your folders back.
 
 Every action shows the list first. You can take all, untick some, or cancel, and then confirm
 with y/N. Nothing happens before that.
@@ -70,7 +74,8 @@ src/tgo/
   scanner.py       Scanner (Telegram -> Repository)
   selection.py     ChatFilter + ChatSelector (protected chats)
   cleanup.py       CleanupExecutor + ActionLog (batches, undo)
-  applier.py       FolderEditor (add to folder), Restorer (undo)
+  applier.py       FolderEditor (add / move chats between folders), Restorer (undo)
+  sorter.py        browser sorter: board state + local server (sorter.html is the page)
   backup.py        FolderBackup + BackupStore
   folder_index.py  which folders show each chat
   report.py        counts for the overview

@@ -139,6 +139,11 @@ class TelethonMapper:
         )
 
     @staticmethod
+    def has_type_rules(f: DialogFilter) -> bool:
+        """Folder shows chats by type ("all channels"...), so it's valid without listed chats."""
+        return any(getattr(f, k, False) for k in ("contacts", "non_contacts", "groups", "broadcasts", "bots"))
+
+    @staticmethod
     def with_peers(live: DialogFilter, peers: list, emoticon: str | None) -> DialogFilter:
         """Copy of a live folder with a new include list; flags, title, pins stay as they are."""
         updated = copy.copy(live)

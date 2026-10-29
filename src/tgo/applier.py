@@ -8,6 +8,7 @@ from telethon.errors import RPCError
 from telethon.tl.types import DialogFilter
 
 from tgo.backup import BackupStore, FolderBackup
+from tgo.models import FolderLimits
 from tgo.telegram import TelethonMapper
 
 FIRST_FILTER_ID = 2  # 0 = "All chats", 1 = archive
@@ -25,14 +26,15 @@ class FolderGateway(Protocol):
 
 
 class WriteResult(BaseModel):
-    backup: Path
+    backup: Path | None = None  # None when nothing was written (checks failed)
     done: list[str] = Field(default_factory=list)
+    problems: list[str] = Field(default_factory=list)  # found before writing; nothing changed
     failed: str | None = None
     error: str | None = None
 
     @property
     def ok(self) -> bool:
-        return self.failed is None
+        return self.failed is None and not self.problems
 
 
 class FolderWriter:
@@ -100,6 +102,60 @@ class FolderEditor(FolderWriter):
             step = self._updater(existing, chat_ids)
             label = f"update {name}"
         return await self.run(backup, [(label, step)], on_step)
+
+    async def apply_moves(self, moves: dict[int, str | None], limits: FolderLimits,
+                          on_step: Callable[[str], None] = lambda _: None) -> WriteResult:
+        """Put each chat in `moves` into exactly the named folder (None = no folder), taking it
+        out of any other own folder. Folders that don't exist yet are created. Checks everything
+        first; writes nothing if a check fails."""
+        live = await self.live()
+        own = [f for f in live if isinstance(f, DialogFilter)]
+        titles = {self._title(f) for f in live if self._title(f)}
+        steps, problems = [], []
+
+        for f in own:
+            name = self._title(f)
+            leaving = {cid for cid, target in moves.items() if target != name}
+            include = [p for p in f.include_peers if await self.peer_id(p) not in leaving]
+            pinned = [p for p in f.pinned_peers if await self.peer_id(p) not in leaving]
+            present = await self.peer_ids(include) | await self.peer_ids(pinned)
+            adds = [cid for cid, target in moves.items() if target == name and cid not in present]
+            if len(include) == len(f.include_peers) and len(pinned) == len(f.pinned_peers) and not adds:
+                continue  # untouched
+            count = len(include) + len(pinned) + len(adds)
+            if count > limits.chats_per_folder:
+                problems.append(f"'{name}' would have {count} chats; the limit is {limits.chats_per_folder}.")
+            if count == 0 and not TelethonMapper.has_type_rules(f):
+                problems.append(f"'{name}' would be empty, and Telegram doesn't allow empty folders. "
+                                "Leave at least one chat in it (or delete the folder in Telegram).")
+            steps.append((f"update {name}", self._mover(f, include, pinned, adds)))
+
+        new = sorted({t for t in moves.values() if t and t not in titles})
+        if len([f for f in live if TelethonMapper.filter_id(f)]) + len(new) > limits.folders:
+            problems.append(f"Too many folders: your account allows {limits.folders}.")
+        used = {TelethonMapper.filter_id(f) for f in live}
+        free_ids = (i for i in range(FIRST_FILTER_ID, 256) if i not in used)
+        for name in new:
+            chat_ids = [cid for cid, target in moves.items() if target == name]
+            if len(chat_ids) > limits.chats_per_folder:
+                problems.append(f"'{name}' would have {len(chat_ids)} chats; "
+                                f"the limit is {limits.chats_per_folder}.")
+            steps.append((f"create {name}", self._creator(next(free_ids), name, None, chat_ids)))
+
+        if problems:
+            return WriteResult(problems=problems)
+        if not steps:
+            return WriteResult()
+        backup = await self.backup(live, "before sorting in the browser")
+        return await self.run(backup, steps, on_step)
+
+    def _mover(self, live: DialogFilter, include: list, pinned: list, adds: list[int]):
+        async def step():
+            new_peers = [await self.gw.input_peer(pid) for pid in adds]
+            updated = TelethonMapper.with_peers(live, include + new_peers, None)
+            updated.pinned_peers = pinned
+            await self.gw.save_filter(live.id, updated)
+        return step
 
     def _creator(self, filter_id: int, name: str, emoticon: str | None, chat_ids: list[int]):
         async def step():

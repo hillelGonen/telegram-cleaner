@@ -1,4 +1,5 @@
 import asyncio
+import webbrowser
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import Any, TypeVar
@@ -16,6 +17,7 @@ from tgo.repository import Repository
 from tgo.scanner import Scanner
 from tgo.selection import ChatFilter, ChatSelector
 from tgo.settings import Settings
+from tgo.sorter import SorterBoard, SorterServer, parse_save
 from tgo.telegram import TelegramGateway
 from tgo.text import TerminalText
 from tgo.views import ChatTableView, OverviewView, ResultView
@@ -186,6 +188,61 @@ class TgoApp:
         self._pick_and_run(flt, action)
 
     def sort_folders(self) -> None:
+        how = self.ask.select("How do you want to sort?", [
+            Option("In your browser – drag and drop (recommended)", "web"),
+            Option("Here – find channels by keywords", "keywords"),
+        ])
+        if how == "web":
+            self.sort_in_browser()
+        elif how == "keywords":
+            self.sort_by_keywords()
+
+    def sort_in_browser(self) -> None:
+        server = SorterServer()
+        server.start()
+        if not webbrowser.open(server.url):
+            self.console.print("Open this address in your browser:")
+        self.console.print(f"[bold]{server.url}[/bold]\n[dim]Sorting in the browser… click Done there "
+                           "(or press Ctrl+C here) to come back to this menu.[/dim]")
+        try:
+            while True:
+                request = server.next_request()
+                if request is None:
+                    continue
+                route, data, reply = request
+                if route == "done":
+                    reply.put({"ok": True})
+                    return
+                reply.put(self._board().state() if route == "state" else self._browser_save(data))
+        except KeyboardInterrupt:
+            self.console.print("[dim]Stopped the browser sorter.[/dim]")
+        finally:
+            server.stop()
+
+    def _board(self) -> SorterBoard:
+        chats, folders, repo = self.load()
+        with repo:
+            limits = repo.folder_limits or FolderLimits()
+        return SorterBoard(chats, folders, limits)
+
+    def _browser_save(self, data: dict) -> dict:
+        board = self._board()
+        moves, problems = parse_save(data, {f.title for f in board.folders})
+        if problems:
+            return {"ok": False, "problems": problems}
+        self.console.print(f"Saving {len(moves)} change(s) from the browser…")
+
+        async def work(tg):
+            result = await FolderEditor(tg, self.store, sleep=self.sleep).apply_moves(moves, board.limits)
+            if result.done:
+                await self._save_folders(tg)
+            return result
+        result = self.telegram(work)
+        self.result_view.folder_write(result)
+        return {"ok": result.ok, "problems": result.problems, "error": result.error,
+                "state": self._board().state() if result.done else None}
+
+    def sort_by_keywords(self) -> None:
         chats, folders, repo = self.load()
         with repo:
             scanned_at, limits = repo.last_scan, repo.folder_limits or FolderLimits()

@@ -5,7 +5,7 @@ from fakes import SELF_ID, FakeGateway, ch, live_filters, marked, rpc_error
 
 from tgo.applier import FolderEditor, Restorer
 from tgo.backup import BackupStore, FolderBackup
-from tgo.models import Folder
+from tgo.models import Folder, FolderLimits
 from tgo.telegram import TelethonMapper
 
 
@@ -94,3 +94,41 @@ def test_backup_store_roundtrip(store):
     assert [bytes(s.tl()) for s in loaded.folders] == [bytes(f) for f in filters]
     assert loaded.titles == ["News", "Shared"]
     assert isinstance(loaded.folders[1].folder, Folder)
+
+
+# moves from the browser sorter
+
+LIMITS = FolderLimits()
+
+
+def test_moves_between_folders_and_out(store):
+    gw = FakeGateway()  # News: include 1, 2 · pinned 5 · Shared (chatlist): 4
+    moves = {marked(1): "Tech", marked(5): None, marked(3): "News"}
+    result = run(FolderEditor(gw, store, sleep=no_sleep).apply_moves(moves, LIMITS))
+    assert result.ok and result.done == ["update News", "create Tech"]
+    news, tech = gw.filters[1], gw.filters[-1]
+    assert include_ids(news) == [marked(2), marked(3)] and news.pinned_peers == []
+    assert news.broadcasts and news.color == 3  # untouched settings
+    assert (tech.title.text, include_ids(tech)) == ("Tech", [marked(1)])
+    assert gw.filters[2].include_peers == [ch(4)]  # shared folder never edited
+
+
+def test_moves_checked_before_writing(store):
+    gw = FakeGateway()
+    gw.filters[1].broadcasts = False  # no type rules: may not become empty
+    moves = {marked(1): None, marked(2): None, marked(5): None}
+    result = run(FolderEditor(gw, store, sleep=no_sleep).apply_moves(moves, LIMITS))
+    assert not result.ok and "would be empty" in result.problems[0]
+    assert gw.calls == [] and result.backup is None and store.list() == []
+
+    small = FolderLimits(folders=3, chats_per_folder=2)
+    result = run(FolderEditor(gw, store, sleep=no_sleep).apply_moves(
+        {marked(3): "News", marked(6): "A", marked(7): "B"}, small))
+    assert any("limit is 2" in p for p in result.problems)
+    assert any("Too many folders" in p for p in result.problems)
+
+
+def test_no_moves_writes_nothing(store):
+    gw = FakeGateway()
+    result = run(FolderEditor(gw, store, sleep=no_sleep).apply_moves({marked(1): "News"}, LIMITS))
+    assert result.ok and result.done == [] and gw.calls == []

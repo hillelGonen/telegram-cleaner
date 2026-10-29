@@ -102,7 +102,7 @@ def test_not_reading_mutes_unmuted_only(make_app, gw):
 
 
 def test_sort_into_existing_folder(make_app, gw):
-    app = make_app("News", "news daily", "All", True)
+    app = make_app("Here", "News", "news daily", "All", True)
     app.sort_folders()
     news = gw.filters[1]
     # Kan news already in; Tech daily + Ynet news added (by title); flags/pins untouched
@@ -112,22 +112,22 @@ def test_sort_into_existing_folder(make_app, gw):
 
 
 def test_sort_into_new_folder(make_app, gw):
-    make_app("New folder", "Tech", "tech", "All", True).sort_folders()
+    make_app("Here", "New folder", "Tech", "tech", "All", True).sort_folders()
     tech = gw.filters[-1]
     assert tech.title.text == "Tech" and include_ids(tech) == [marked(6)]
 
 
 def test_sort_rejects_long_name_and_no_match(make_app, gw):
-    app = make_app("New folder", "A very long folder name")
+    app = make_app("Here", "New folder", "A very long folder name")
     app.sort_folders()
-    make_app("News", "zzz").sort_folders()
+    make_app("Here", "News", "zzz").sort_folders()
     assert gw.calls == []
     assert "Too long" in app.console.export_text()
 
 
 def test_undo_folder_change(make_app, gw):
     before = [bytes(f) for f in gw.filters]
-    make_app("New folder", "Tech", "tech", "All", True).sort_folders()
+    make_app("Here", "New folder", "Tech", "tech", "All", True).sort_folders()
     assert len(gw.filters) == 4
     make_app("Undo last folder change", True).undo()
     assert [bytes(f) for f in gw.filters] == before
@@ -178,3 +178,44 @@ def test_one_connection_for_the_whole_session(make_app, gw):
     assert gw.connects == 1 and len(gw.calls) == 2
     app.close()
     assert gw.connects == 0
+
+
+def test_sort_in_browser_end_to_end(make_app, gw, monkeypatch):
+    """Real HTTP from a 'browser' thread; the menu answers on the main thread."""
+    import json
+    import threading
+    import urllib.request
+
+    opened = []
+    monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url) or True)
+    app = make_app("In your browser")
+    results = {}
+
+    def browser():
+        import time
+        while not opened:
+            time.sleep(0.01)
+        url = opened[0]
+        port, token = url.split(":")[2].split("/")[0], url.split("t=")[1]
+
+        def post(route, body=None):
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/api/{route}",
+                                         data=json.dumps(body or {}).encode(),
+                                         headers={"X-Tgo-Token": token}, method="POST")
+            return json.load(urllib.request.urlopen(req, timeout=10))
+
+        results["state"] = post("state")
+        results["save"] = post("save", {"moves": {str(marked(3)): "News", str(marked(6)): "Tech"}})
+        post("done")
+
+    t = threading.Thread(target=browser)
+    t.start()
+    app.sort_folders()
+    t.join()
+
+    assert "Ynet news" in [c["title"] for c in results["state"]["chats"].values()]
+    assert results["save"]["ok"], results["save"]
+    assert include_ids(gw.filters[1])[-1] == marked(3)
+    assert gw.filters[-1].title.text == "Tech"
+    names = [f["name"] for f in results["save"]["state"]["folders"]]
+    assert "Tech" in names  # board reloaded from the refreshed local folders

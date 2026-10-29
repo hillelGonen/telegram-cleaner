@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tgo – Sort into folders</title>
+<style>
+  /* dark by default; light via the ☀️ button (remembered in this browser) */
+  :root {
+    --bg: #15181d; --panel: #1d2128; --card: #252a32; --text: #e6e8eb; --muted: #949ba6;
+    --line: #313741; --accent: #5aa2f5; --accent-soft: #23344a; --moved: #f0b13f;
+    --danger: #ef6b6b; --ok: #4cc283; --shadow: none; color-scheme: dark;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f5f7; --panel: #ffffff; --card: #ffffff; --text: #1d2127; --muted: #6b7380;
+    --line: #dfe2e7; --accent: #2a7de1; --accent-soft: #e3effc; --moved: #f5a524;
+    --danger: #d64545; --ok: #2e9e5b; --shadow: 0 1px 2px rgba(0,0,0,.06); color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text);
+         font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Hebrew", Arial, sans-serif;
+         display: flex; flex-direction: column; }
+  header { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 12px 16px;
+           background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0 8px 0 0; }
+  .hint { color: var(--muted); font-size: 13px; }
+  .spacer { flex: 1; }
+  input[type=search], .newcol input { font: inherit; color: var(--text); background: var(--bg);
+           border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+  input[type=search] { width: 220px; }
+  button { font: inherit; border-radius: 8px; padding: 7px 14px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .45; cursor: default; }
+  main { flex: 1; overflow-x: auto; overflow-y: hidden; display: flex; gap: 12px; padding: 14px 16px; }
+  .col { flex: 0 0 260px; display: flex; flex-direction: column; max-height: 100%;
+         background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+  .col.loose { flex-basis: 300px; }
+  .col.over { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+  .colhead { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: baseline; }
+  .colhead .name { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .count.full { color: var(--danger); font-weight: 600; }
+  .note { padding: 6px 12px 0; color: var(--muted); font-size: 12px; }
+  .cards { overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-height: 60px; flex: 1; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px;
+          cursor: grab; box-shadow: var(--shadow); user-select: none; }
+  .card:active { cursor: grabbing; }
+  .card.sel { border-color: var(--accent); background: var(--accent-soft); }
+  .card.moved { border-left: 4px solid var(--moved); }
+  .card .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card .m { color: var(--muted); font-size: 12px; display: flex; gap: 6px; align-items: center; }
+  .badge { background: var(--accent); color: #fff; border-radius: 9px; padding: 0 6px; font-size: 11px; }
+  .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 18px 6px; }
+  .newcol { flex: 0 0 220px; border: 2px dashed var(--line); border-radius: 12px; padding: 12px;
+            display: flex; flex-direction: column; gap: 8px; align-self: flex-start; }
+  .newcol input { width: 100%; }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; padding: 16px; }
+  .modal.open { display: flex; }
+  .dialog { background: var(--panel); border-radius: 12px; padding: 18px 20px; width: min(560px, 100%);
+            max-height: 80vh; overflow: auto; border: 1px solid var(--line); }
+  .dialog h2 { margin: 0 0 10px; font-size: 17px; }
+  .dialog ul { margin: 6px 0 12px; padding-left: 18px; }
+  .dialog .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  .problems { color: var(--danger); }
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--text);
+           color: var(--bg); padding: 9px 16px; border-radius: 10px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: .95; }
+  .finished { margin: auto; text-align: center; color: var(--muted); }
+  .finished h2 { color: var(--text); }
+</style>
+</head>
+<body>
+<header>
+  <h1>📁 Sort into folders</h1>
+  <span class="hint">Drag cards between folders. Click cards to select several, then drag them together.</span>
+  <span class="spacer"></span>
+  <input type="search" id="search" placeholder="Search…" aria-label="Search chats">
+  <button id="save" class="primary" disabled>Save</button>
+  <button id="theme" title="Light / dark" aria-label="Switch light or dark theme">☀️</button>
+  <button id="done">Done</button>
+</header>
+<main id="board"><div class="finished">Loading…</div></main>
+
+<div class="modal" id="modal" role="dialog" aria-modal="true"><div class="dialog" id="dialog"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+const TOKEN = new URLSearchParams(location.search).get("t");
+const LOOSE = "";            // column key for "not in a folder"
+const TYPE_ICON = {channel: "📢", group: "👥", bot: "🤖"};
+let S = null;                // state from the terminal
+let where = {};              // chat id -> column key (current, in the page)
+let original = {};           // chat id -> column key (as saved in Telegram)
+let columns = [];            // [{key, name, emoticon, typeRules, isNew}]
+let selected = new Set();
+let dragging = [];
+let finished = false;
+
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+async function api(route, body) {
+  const r = await fetch("/api/" + route, {method: "POST", headers: {"Content-Type": "application/json", "X-Tgo-Token": TOKEN},
+                                         body: JSON.stringify(body || {})});
+  if (!r.ok) throw new Error("The terminal refused the request (" + r.status + ").");
+  return r.json();
+}
+
+function load(state) {
+  S = state; where = {}; selected.clear();
+  columns = [{key: LOOSE, name: "Not in a folder"}];
+  for (const id of S.loose) where[id] = LOOSE;
+  for (const f of S.folders) {
+    columns.push({key: f.name, name: f.name, emoticon: f.emoticon, typeRules: f.typeRules});
+    for (const id of f.chats) where[id] = f.name;
+  }
+  original = {...where};
+  render();
+}
+
+function changes() { return Object.keys(where).filter((id) => where[id] !== original[id]); }
+
+function render() {
+  const board = $("board"); board.innerHTML = "";
+  const q = $("search").value.trim().toLowerCase();
+  for (const col of columns) board.append(renderColumn(col, q));
+  board.append(renderNewColumn());
+  const n = changes().length;
+  $("save").disabled = n === 0;
+  $("save").textContent = n ? `Save ${n} change${n > 1 ? "s" : ""}` : "Save";
+}
+
+function renderColumn(col, q) {
+  const box = el("section", "col" + (col.key === LOOSE ? " loose" : ""));
+  const head = el("div", "colhead");
+  const name = el("span", "name", (col.emoticon ? col.emoticon + " " : "") + col.name);
+  name.dir = "auto";
+  const ids = Object.keys(where).filter((id) => where[id] === col.key);
+  const count = el("span", "count", col.key === LOOSE ? String(ids.length) : `${ids.length}/${S.limits.perFolder}`);
+  if (col.key !== LOOSE && ids.length > S.limits.perFolder) count.classList.add("full");
+  head.append(name, count); box.append(head);
+  if (col.isNew) box.append(el("div", "note", "New – created when you save"));
+  else if (col.typeRules) box.append(el("div", "note", "Also shows chats by type (set in Telegram)"));
+
+  const list = el("div", "cards");
+  const visible = ids.filter((id) => matches(id, q));
+  for (const id of visible) list.append(renderCard(id));
+  if (!visible.length) list.append(el("div", "empty", q ? "No matches" : "Drop chats here"));
+  box.append(list);
+
+  box.addEventListener("dragover", (e) => { e.preventDefault(); box.classList.add("over"); });
+  box.addEventListener("dragleave", (e) => { if (!box.contains(e.relatedTarget)) box.classList.remove("over"); });
+  box.addEventListener("drop", (e) => { e.preventDefault(); box.classList.remove("over"); moveTo(col.key); });
+  return box;
+}
+
+function renderCard(id) {
+  const c = S.chats[id];
+  const card = el("div", "card" + (selected.has(id) ? " sel" : "") + (where[id] !== original[id] ? " moved" : ""));
+  card.draggable = true;
+  const t = el("div", "t", c.title); t.dir = "auto"; t.title = c.title;
+  const m = el("div", "m");
+  m.append(el("span", null, TYPE_ICON[c.type] || ""));
+  if (c.username) m.append(el("span", null, "@" + c.username));
+  if (c.muted) m.append(el("span", null, "🔕"));
+  if (c.unread) m.append(el("span", "badge", c.unread >= 1000 ? Math.round(c.unread / 100) / 10 + "k" : String(c.unread)));
+  card.append(t, m);
+  card.addEventListener("click", () => { selected.has(id) ? selected.delete(id) : selected.add(id); render(); });
+  card.addEventListener("dragstart", (e) => {
+    dragging = selected.has(id) ? [...selected] : [id];
+    e.dataTransfer.setData("text/plain", dragging.join(","));
+    e.dataTransfer.effectAllowed = "move";
+  });
+  return card;
+}
+
+function renderNewColumn() {
+  const box = el("div", "newcol");
+  const room = S.limits.folders - S.folderCount - columns.filter((c) => c.isNew).length;
+  if (room <= 0) { box.append(el("div", "hint", `Folder limit reached (${S.limits.folders}).`)); return box; }
+  const input = el("input"); input.placeholder = "＋ New folder name"; input.maxLength = S.nameMax; input.dir = "auto";
+  const add = el("button", null, "Add folder");
+  const create = () => {
+    const name = input.value.trim();
+    const taken = columns.some((c) => c.name === name) || S.otherFolders.includes(name);
+    if (!name) return input.focus();
+    if (taken) return toast("A folder with that name already exists.");
+    columns.push({key: name, name, isNew: true}); render();
+  };
+  add.addEventListener("click", create);
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") create(); });
+  box.append(input, add, el("div", "hint", `Up to ${S.nameMax} characters · ${room} more allowed`));
+  return box;
+}
+
+function matches(id, q) {
+  if (!q) return true;
+  const c = S.chats[id];
+  return c.title.toLowerCase().includes(q) || (c.username || "").toLowerCase().includes(q);
+}
+
+function moveTo(key) {
+  for (const id of dragging) where[id] = key;
+  selected.clear(); dragging = []; render();
+}
+
+function openDialog(build) { const d = $("dialog"); d.innerHTML = ""; build(d); $("modal").classList.add("open"); }
+function closeDialog() { $("modal").classList.remove("open"); }
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 2600); }
+
+function reviewSave() {
+  const ids = changes();
+  const byTarget = {};
+  for (const id of ids) (byTarget[where[id]] ??= []).push(id);
+  openDialog((d) => {
+    d.append(el("h2", null, `Save ${ids.length} change${ids.length > 1 ? "s" : ""} to Telegram?`));
+    for (const [target, list] of Object.entries(byTarget)) {
+      const col = columns.find((c) => c.key === target);
+      d.append(el("div", null, target === LOOSE ? "Remove from their folder:" : `Move to ${col.name}${col.isNew ? " (new)" : ""}:`));
+      const ul = el("ul");
+      for (const id of list) { const li = el("li", null, S.chats[id].title); li.dir = "auto"; ul.append(li); }
+      d.append(ul);
+    }
+    d.append(el("div", "hint", "A backup is saved first, so you can undo this from the terminal menu (Undo)."));
+    const actions = el("div", "actions");
+    const cancel = el("button", null, "Cancel"); cancel.onclick = closeDialog;
+    const go = el("button", "primary", "Save to Telegram");
+    go.onclick = () => doSave(ids, go, d);
+    actions.append(cancel, go); d.append(actions);
+  });
+}
+
+async function doSave(ids, button, dialog) {
+  button.disabled = true; button.textContent = "Saving…";
+  const moves = {};
+  for (const id of ids) moves[id] = where[id] === LOOSE ? null : where[id];
+  try {
+    const r = await api("save", {moves});
+    if (r.ok) { closeDialog(); load(r.state); toast("Saved ✓"); return; }
+    const box = el("div", "problems");
+    for (const p of [...(r.problems || []), ...(r.error ? [r.error] : [])]) box.append(el("p", null, p));
+    if (r.state) { box.append(el("p", "hint", "Some changes were written before the error; the board now shows what is in Telegram.")); load(r.state); }
+    dialog.append(box);
+  } catch (e) { dialog.append(el("p", "problems", String(e.message || e))); }
+  button.disabled = false; button.textContent = "Save to Telegram";
+}
+
+async function finish() {
+  if (changes().length && !confirm("You have unsaved changes. Leave without saving?")) return;
+  finished = true;
+  try { await api("done"); } catch (e) { /* the terminal may already be gone */ }
+  document.body.innerHTML = "";
+  const box = el("div", "finished");
+  box.append(el("h2", null, "All set"), el("p", null, "You can close this tab and go back to the terminal."));
+  document.body.append(box);
+}
+
+function setTheme(light) {
+  document.documentElement.dataset.theme = light ? "light" : "dark";
+  $("theme").textContent = light ? "🌙" : "☀️";
+  try { localStorage.setItem("tgo-theme", light ? "light" : "dark"); } catch (e) { /* private mode */ }
+}
+let savedTheme = null;
+try { savedTheme = localStorage.getItem("tgo-theme"); } catch (e) { /* private mode */ }
+setTheme(savedTheme === "light");
+$("theme").addEventListener("click", () => setTheme(document.documentElement.dataset.theme !== "light"));
+
+$("search").addEventListener("input", render);
+$("save").addEventListener("click", reviewSave);
+$("done").addEventListener("click", finish);
+$("modal").addEventListener("click", (e) => { if (e.target.id === "modal") closeDialog(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeDialog(); selected.clear(); render(); } });
+window.addEventListener("beforeunload", (e) => { if (!finished && changes().length) { e.preventDefault(); e.returnValue = ""; } });
+
+api("state").then(load).catch((e) => { $("board").innerHTML = ""; $("board").append(el("div", "finished", String(e.message || e))); });
+</script>
+</body>
+</html>
