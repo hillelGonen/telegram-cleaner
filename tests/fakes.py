@@ -13,6 +13,7 @@ from telethon.tl.types import (
     TextWithEntities,
 )
 
+from tgo.models import FolderLimits
 from tgo.prompter import Option
 from tgo.telegram import TelethonMapper
 
@@ -42,10 +43,13 @@ def live_filters() -> list:
 
 
 class FakeGateway:
-    """Folder + chat-action side of TelegramGateway, in memory."""
+    """TelegramGateway in memory: folders, chat actions, and what a scan would read.
+    Actions change the stored chats, so a rescan sees their effect like real Telegram."""
 
-    def __init__(self, filters: list | None = None):
+    def __init__(self, filters: list | None = None, chats: list | None = None):
         self.filters = filters if filters is not None else live_filters()
+        self._chats = {c.id: c.model_copy() for c in chats or []}
+        self.scans = 0
         self.calls: list[tuple] = []
         self.fail: dict[str, Exception] = {}
         self.connects = 0
@@ -66,6 +70,20 @@ class FakeGateway:
 
     async def self_id(self):
         return SELF_ID
+
+    # what Scanner reads
+
+    async def chats(self, seen_at):
+        self.scans += 1
+        for chat in list(self._chats.values()):
+            yield chat.model_copy(update={"seen_at": seen_at})
+
+    async def folder_limits(self):
+        return FolderLimits()
+
+    def _update(self, chat_id, **fields):
+        if chat_id in self._chats:
+            self._chats[chat_id] = self._chats[chat_id].model_copy(update=fields)
 
     def _record(self, *call):
         self.calls.append(call)
@@ -114,20 +132,26 @@ class FakeGateway:
         try:
             await asyncio.sleep(0)  # let other tasks start, like a network call would
             self._record("leave", chat_id)
+            self._chats.pop(chat_id, None)
         finally:
             self.in_flight -= 1
 
     async def set_archived(self, chat_id, archived):
         self._record("archive" if archived else "unarchive", chat_id)
+        self._update(chat_id, archived=archived)
 
     async def set_archived_many(self, chat_ids, archived):
         self._record("archive_many" if archived else "unarchive_many", tuple(chat_ids))
+        for chat_id in chat_ids:
+            self._update(chat_id, archived=archived)
 
     async def set_muted(self, chat_id, muted):
         self._record("mute" if muted else "unmute", chat_id)
+        self._update(chat_id, muted=muted)
 
     async def mark_read(self, chat_id):
         self._record("read", chat_id)
+        self._update(chat_id, unread=0)
 
 
 def rpc_error(message: str) -> RPCError:

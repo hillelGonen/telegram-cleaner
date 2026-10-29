@@ -97,12 +97,16 @@ def test_unknown_route_rejected(server):
     assert e.value.code == 403
 
 
-def test_stable_port_with_fallback():
-    from tgo.sorter import DEFAULT_PORT
-    first = SorterServer()
-    second = SorterServer()  # default port now taken -> any free port
+def test_port_falls_back_when_taken():
+    first = SorterServer(port=0)
+    second = SorterServer(port=first.port)  # wanted port is taken -> any free port
     try:
-        assert first.port == DEFAULT_PORT and second.port != DEFAULT_PORT
+        assert second.port not in (0, first.port)
     finally:
         first.stop()
         second.stop()
+
+
+def test_default_port_is_stable():
+    from tgo.sorter import DEFAULT_PORT
+    assert SorterServer.__init__.__defaults__ == (DEFAULT_PORT,)

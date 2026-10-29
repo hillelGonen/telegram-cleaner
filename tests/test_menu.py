@@ -29,7 +29,7 @@ async def no_sleep(_):
 
 @pytest.fixture
 def gw():
-    return FakeGateway()
+    return FakeGateway(chats=CHATS)
 
 
 @pytest.fixture
@@ -230,3 +230,21 @@ def test_delete_folders_from_terminal(make_app, gw):
     assert "News" not in [f.title for f in app.repo().folders()]
     make_app("Undo last folder change", True).undo()
     assert gw.filters[1].title.text == "News"
+
+
+def test_rescans_after_changes(make_app, gw):
+    """After a change the local data is re-read from Telegram, not patched by hand."""
+    app = make_app(["Groups"], "1 year", "Delete", "All", True)
+    app.clean_old()
+    assert gw.scans == 1
+    assert marked(7) not in chats_in_db(app)  # gone because Telegram no longer has it
+
+    make_app("1,000", "Mute", "All", True).not_reading()
+    assert gw.scans == 2
+
+    make_app("Here", "New folder", "Tech", "tech", "All", True).sort_folders()
+    assert gw.scans == 3
+    assert "Tech" in [f.title for f in app.repo().folders()]
+
+    make_app(["Private chats"], "1 year", "Archive", "All", False).clean_old()  # said no
+    assert gw.scans == 3

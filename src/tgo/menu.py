@@ -6,7 +6,7 @@ from typing import Any, TypeVar
 
 from rich.console import Console
 
-from tgo.applier import FolderEditor, Restorer
+from tgo.applier import FolderEditor, Restorer, WriteResult
 from tgo.backup import BackupStore
 from tgo.cleanup import ActionLog, CleanupAction, CleanupExecutor, CleanupResult
 from tgo.folder_index import FolderIndex
@@ -94,11 +94,17 @@ class TgoApp:
         self._loop.close()
         self._loop = None
 
-    async def _save_folders(self, tg) -> None:
-        folders = await tg.folders()
-        with self.repo() as repo:
-            repo.replace_folders(folders)
-            repo.commit()
+    def rescan(self) -> None:
+        """Re-read Telegram after a change, so every screen shows what is really there."""
+        self.ensure_fresh(force=True, label="Refreshing from Telegram…")
+
+    def _write_folders(self, work) -> WriteResult:
+        """Run a folder change, show the result, and rescan if anything was written."""
+        result = self.telegram(work)
+        self.result_view.folder_write(result)
+        if result.done:
+            self.rescan()
+        return result
 
     def load(self) -> tuple[list[Chat], list[Folder], Repository]:
         repo = self.repo()
@@ -139,12 +145,12 @@ class TgoApp:
                 self.console.print(f"[green]Logged in as {self.text(me.first_name)}[/green]")
         self.telegram(check)
 
-    def ensure_fresh(self, force: bool = False) -> None:
+    def ensure_fresh(self, force: bool = False, label: str = "Reading your chats…") -> None:
         with self.repo() as repo:
             last = repo.last_scan
             if not force and last and utcnow() - last < SCAN_MAX_AGE:
                 return
-            with self.console.status("Reading your chats…"):
+            with self.console.status(label):
                 result = self.telegram(lambda tg: Scanner(tg, repo).run())
         self.console.print(f"[dim]Scanned {result.chats} chats, {result.folders} folders.[/dim]")
 
@@ -219,12 +225,9 @@ class TgoApp:
             return
 
         async def work(tg):
-            result = await FolderEditor(tg, self.store, sleep=self.sleep).apply_moves(
+            return await FolderEditor(tg, self.store, sleep=self.sleep).apply_moves(
                 {}, limits, frozenset(names))
-            if result.done:
-                await self._save_folders(tg)
-            return result
-        self.result_view.folder_write(self.telegram(work))
+        self._write_folders(work)
 
     def sort_in_browser(self) -> None:
         server = SorterServer()
@@ -264,12 +267,8 @@ class TgoApp:
 
         async def work(tg):
             editor = FolderEditor(tg, self.store, sleep=self.sleep)
-            result = await editor.apply_moves(request.moves, board.limits, frozenset(request.delete))
-            if result.done:
-                await self._save_folders(tg)
-            return result
-        result = self.telegram(work)
-        self.result_view.folder_write(result)
+            return await editor.apply_moves(request.moves, board.limits, frozenset(request.delete))
+        result = self._write_folders(work)  # rescans, so the board below is what Telegram has
         return {"ok": result.ok, "problems": result.problems, "error": result.error,
                 "state": self._board().state() if result.done else None}
 
@@ -325,10 +324,8 @@ class TgoApp:
 
         async def work(tg):
             editor = FolderEditor(tg, self.store, sleep=self.sleep)
-            result = await editor.add_chats(name, [c.id for c in picked])
-            await self._save_folders(tg)
-            return result
-        self.result_view.folder_write(self.telegram(work))
+            return await editor.add_chats(name, [c.id for c in picked])
+        self._write_folders(work)
 
     def undo(self) -> None:
         options = []
@@ -402,6 +399,8 @@ class TgoApp:
                 self.console.print("[yellow]Stopped. Finished chats are saved.[/yellow]")
                 raise
         self.result_view.cleanup(result)
+        if result.done or result.failed:
+            self.rescan()
         return result
 
     def _undo_folders(self, path) -> None:
@@ -418,10 +417,8 @@ class TgoApp:
             return
 
         async def work(tg):
-            result = await Restorer(tg, self.store, backup, sleep=self.sleep).restore()
-            await self._save_folders(tg)
-            return result
-        self.result_view.folder_write(self.telegram(work))
+            return await Restorer(tg, self.store, backup, sleep=self.sleep).restore()
+        self._write_folders(work)
 
     def _undo_batch(self, batch) -> None:
         action = batch[0].action.inverse
