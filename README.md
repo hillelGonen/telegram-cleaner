@@ -5,6 +5,8 @@
 A small menu that helps you clean up and organize Telegram: delete old chats, leave dead groups,
 quiet noisy channels, and sort channels into folders.
 
+![Sorting channels into folders in the browser](https://raw.githubusercontent.com/hillelGonen/telegram-cleaner/main/docs/screenshots/sorter.png)
+
 ## Install
 ```
 pipx install tg-cleaner      # or: uv tool install tg-cleaner
@@ -25,6 +27,8 @@ With uv: `uv tool upgrade tg-cleaner` / `uv tool uninstall tg-cleaner`.
 ```
 tgo
 ```
+<img src="https://raw.githubusercontent.com/hillelGonen/telegram-cleaner/main/docs/screenshots/terminal.svg" alt="tgo menu and overview in the terminal" width="560">
+
 First time it asks you to log in (phone, code from Telegram, 2FA password if set).
 It reads your chats (again whenever the last read is over an hour old), then shows:
 
@@ -36,6 +40,8 @@ It reads your chats (again whenever the last read is over an hour old), then sho
 | 📁 Sort into folders | **In your browser (recommended):** drag channels, groups and bots between folders, ✕ to take one out of a folder, 🗑 to delete a folder, – to minimize a column, ＋ to make a folder; then Save. Or in the terminal: add by words like `news חדשות أخبار`, or delete folders |
 | ↩️ Undo | Undo the last folder change or last archive/mute; list chats you left with rejoin links |
 | 🔄 Rescan now | Read your chats again |
+
+<img src="https://raw.githubusercontent.com/hillelGonen/telegram-cleaner/main/docs/screenshots/sorter-help.png" alt="The browser sorter explains its features on first use" width="720">
 
 The browser sorter runs only on your computer (`127.0.0.1`, a random port and a secret link),
 so no website can reach it. It writes to Telegram only when you click Save, after showing what
@@ -83,6 +89,9 @@ src/tgo/
 ```
 
 ## Development
+Screenshots in this README come from made-up chats: `uv run python scripts/make_screenshots.py`
+(needs Google Chrome).
+
 Release: bump `version` in pyproject.toml, commit, then `git tag vX.Y.Z && git push --tags`;
 the Publish workflow tests, builds and uploads to PyPI.
 
