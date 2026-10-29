@@ -132,3 +132,31 @@ def test_no_moves_writes_nothing(store):
     gw = FakeGateway()
     result = run(FolderEditor(gw, store, sleep=no_sleep).apply_moves({marked(1): "News"}, LIMITS))
     assert result.ok and result.done == [] and gw.calls == []
+
+
+def test_delete_folders_with_and_without_moves(store):
+    gw = FakeGateway()
+    run(FolderEditor(gw, store, sleep=no_sleep).add_chats("Tech", [marked(6)]))  # id 4
+    result = run(FolderEditor(gw, store, sleep=no_sleep).apply_moves(
+        {marked(1): "Tech"}, LIMITS, frozenset({"News"})))
+    assert result.ok and result.done == ["delete News", "update Tech"]
+    titles = [f.title.text for f in gw.filters if hasattr(f, "title")]
+    assert titles == ["Shared", "Tech"]
+    assert include_ids(gw.filters[-1]) == [marked(6), marked(1)]
+    # Undo brings News back exactly
+    assert run(Restorer(gw, store, store.load(result.backup), sleep=no_sleep).restore()).ok
+    assert gw.filters[1].title.text == "News" and gw.filters[1].pinned_peers == [ch(5)]
+
+
+def test_delete_checks(store):
+    gw = FakeGateway()
+    editor = FolderEditor(gw, store, sleep=no_sleep)
+    r = run(editor.apply_moves({}, LIMITS, frozenset({"Shared"})))  # shared folder: not ours
+    assert "not one of your own folders" in r.problems[0]
+    r = run(editor.apply_moves({marked(3): "News"}, LIMITS, frozenset({"News"})))
+    assert any("being deleted" in p for p in r.problems)
+    assert gw.calls == []
+    # deleting frees a slot for a new folder at the limit
+    full = FolderLimits(folders=2)
+    r = run(editor.apply_moves({marked(3): "Tech"}, full, frozenset({"News"})))
+    assert r.ok and r.done == ["delete News", "create Tech"]

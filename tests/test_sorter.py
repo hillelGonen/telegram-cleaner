@@ -34,11 +34,11 @@ def test_board_state():
 
 
 def test_parse_save():
-    moves, problems = parse_save({"moves": {"-1001": "News", "2": None}}, set())
-    assert moves == {-1001: "News", 2: None} and problems == []
-    _, problems = parse_save({"moves": {"1": "A name that is too long"}}, set())
+    request, problems = parse_save({"moves": {"-1001": "News", "2": None}, "delete": ["Old"]})
+    assert request.moves == {-1001: "News", 2: None} and request.delete == ["Old"] and problems == []
+    _, problems = parse_save({"moves": {"1": "A name that is too long"}})
     assert "longer than" in problems[0]
-    _, problems = parse_save({"moves": {"x": "News"}}, set())
+    _, problems = parse_save({"moves": {"x": "News"}})
     assert problems[0].startswith("Bad request")
 
 

@@ -49,7 +49,12 @@
   .card:active { cursor: grabbing; }
   .card.sel { border-color: var(--accent); background: var(--accent-soft); }
   .card.moved { border-left: 4px solid var(--moved); }
-  .card .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card .row { display: flex; gap: 6px; align-items: flex-start; }
+  .card .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .card .x { border: none; background: none; color: var(--muted); padding: 0 2px; cursor: pointer;
+             font-size: 13px; line-height: 1.4; opacity: 0; }
+  .card:hover .x, .card.sel .x, .card .x:focus { opacity: 1; }
+  .card .x:hover { color: var(--danger); }
   .card .m { color: var(--muted); font-size: 12px; display: flex; gap: 6px; align-items: center; }
   .badge { background: var(--accent); color: #fff; border-radius: 9px; padding: 0 6px; font-size: 11px; }
   .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 18px 6px; }
@@ -67,6 +72,18 @@
   .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--text);
            color: var(--bg); padding: 9px 16px; border-radius: 10px; opacity: 0; transition: opacity .2s; pointer-events: none; }
   .toast.show { opacity: .95; }
+  .col.min { flex: 0 0 46px; cursor: pointer; }
+  .col.min .colhead { writing-mode: vertical-rl; border-bottom: none; padding: 12px 0; align-items: center;
+                      flex: 1; gap: 10px; }
+  .col.min .cards, .col.min .note, .col.min .trash { display: none; }
+  .fold { border: none; background: none; color: var(--muted); padding: 0 2px; cursor: pointer;
+          font-size: 15px; line-height: 1; }
+  .fold:hover { color: var(--text); }
+  .trash { border: none; background: none; padding: 0 2px; cursor: pointer; opacity: .55; font-size: 14px; }
+  .trash:hover { opacity: 1; }
+  #deleted { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { border: 1px solid var(--danger); color: var(--danger); border-radius: 14px; padding: 2px 10px;
+          font-size: 12px; background: none; }
   .finished { margin: auto; text-align: center; color: var(--muted); }
   .finished h2 { color: var(--text); }
 </style>
@@ -74,7 +91,8 @@
 <body>
 <header>
   <h1>📁 Sort into folders</h1>
-  <span class="hint">Drag cards between folders. Click cards to select several, then drag them together.</span>
+  <span class="hint">Drag cards between folders · ✕ removes from a folder · click cards to select several.</span>
+  <span id="deleted"></span>
   <span class="spacer"></span>
   <input type="search" id="search" placeholder="Search…" aria-label="Search chats">
   <button id="save" class="primary" disabled>Save</button>
@@ -95,6 +113,10 @@ let S = null;                // state from the terminal
 let where = {};              // chat id -> column key (current, in the page)
 let original = {};           // chat id -> column key (as saved in Telegram)
 let columns = [];            // [{key, name, emoticon, typeRules, isNew}]
+let deleted = [];            // folder names marked for deletion (applied on Save)
+let freed = {};              // folder name -> chats its deletion moved to "Not in a folder"
+let minimized = new Set();   // column keys shown as a narrow strip (remembered in this browser)
+try { minimized = new Set(JSON.parse(localStorage.getItem("tgo-minimized") || "[]")); } catch (e) { /* private mode */ }
 let selected = new Set();
 let dragging = [];
 let finished = false;
@@ -110,7 +132,7 @@ async function api(route, body) {
 }
 
 function load(state) {
-  S = state; where = {}; selected.clear();
+  S = state; where = {}; deleted = []; freed = {}; selected.clear();
   columns = [{key: LOOSE, name: "Not in a folder"}];
   for (const id of S.loose) where[id] = LOOSE;
   for (const f of S.folders) {
@@ -121,27 +143,51 @@ function load(state) {
   render();
 }
 
-function changes() { return Object.keys(where).filter((id) => where[id] !== original[id]); }
+// Chats that left a deleted folder are implied by the deletion, not separate moves (a "move to
+// no folder" would also take them out of any other folder they're in).
+function changes() {
+  return Object.keys(where).filter((id) => where[id] !== original[id]
+    && !(where[id] === LOOSE && deleted.includes(original[id])));
+}
+function pending() { return changes().length + deleted.length; }
 
 function render() {
   const board = $("board"); board.innerHTML = "";
   const q = $("search").value.trim().toLowerCase();
   for (const col of columns) board.append(renderColumn(col, q));
   board.append(renderNewColumn());
-  const n = changes().length;
+  const n = pending();
   $("save").disabled = n === 0;
+  const chips = $("deleted"); chips.innerHTML = "";
+  for (const name of deleted) {
+    const chip = el("button", "chip", "🗑 " + name + " · undo"); chip.dir = "auto";
+    chip.title = "Keep this folder"; chip.onclick = () => restoreFolder(name);
+    chips.append(chip);
+  }
   $("save").textContent = n ? `Save ${n} change${n > 1 ? "s" : ""}` : "Save";
 }
 
 function renderColumn(col, q) {
-  const box = el("section", "col" + (col.key === LOOSE ? " loose" : ""));
+  const isMin = minimized.has(col.key);
+  const box = el("section", "col" + (col.key === LOOSE ? " loose" : "") + (isMin ? " min" : ""));
+  if (isMin) { box.title = `${col.name} – click to expand`; box.onclick = () => toggleMin(col.key); }
   const head = el("div", "colhead");
   const name = el("span", "name", (col.emoticon ? col.emoticon + " " : "") + col.name);
   name.dir = "auto";
   const ids = Object.keys(where).filter((id) => where[id] === col.key);
   const count = el("span", "count", col.key === LOOSE ? String(ids.length) : `${ids.length}/${S.limits.perFolder}`);
   if (col.key !== LOOSE && ids.length > S.limits.perFolder) count.classList.add("full");
-  head.append(name, count); box.append(head);
+  const fold = el("button", "fold", isMin ? "+" : "–");
+  fold.title = isMin ? "Expand" : "Minimize"; fold.setAttribute("aria-label", fold.title + " " + col.name);
+  fold.onclick = (e) => { e.stopPropagation(); toggleMin(col.key); };
+  head.append(fold, name, count);
+  if (col.key !== LOOSE) {
+    const trash = el("button", "trash", "🗑"); trash.title = "Delete this folder";
+    trash.setAttribute("aria-label", "Delete folder " + col.name);
+    trash.onclick = () => deleteFolder(col);
+    head.append(trash);
+  }
+  box.append(head);
   if (col.isNew) box.append(el("div", "note", "New – created when you save"));
   else if (col.typeRules) box.append(el("div", "note", "Also shows chats by type (set in Telegram)"));
 
@@ -167,7 +213,16 @@ function renderCard(id) {
   if (c.username) m.append(el("span", null, "@" + c.username));
   if (c.muted) m.append(el("span", null, "🔕"));
   if (c.unread) m.append(el("span", "badge", c.unread >= 1000 ? Math.round(c.unread / 100) / 10 + "k" : String(c.unread)));
-  card.append(t, m);
+  const row = el("div", "row"); row.append(t);
+  if (where[id] !== LOOSE) {
+    const x = el("button", "x", "✕");
+    x.title = selected.has(id) && selected.size > 1 ? `Remove ${selected.size} selected from their folder`
+                                                     : "Remove from this folder";
+    x.setAttribute("aria-label", x.title);
+    x.onclick = (e) => { e.stopPropagation(); removeFromFolder(id); };
+    row.append(x);
+  }
+  card.append(row, m);
   card.addEventListener("click", () => { selected.has(id) ? selected.delete(id) : selected.add(id); render(); });
   card.addEventListener("dragstart", (e) => {
     dragging = selected.has(id) ? [...selected] : [id];
@@ -196,6 +251,42 @@ function renderNewColumn() {
   return box;
 }
 
+function toggleMin(key) {
+  minimized.has(key) ? minimized.delete(key) : minimized.add(key);
+  try { localStorage.setItem("tgo-minimized", JSON.stringify([...minimized])); } catch (e) { /* private mode */ }
+  render();
+}
+
+function removeFromFolder(id) {
+  const ids = selected.has(id) ? [...selected] : [id];
+  for (const i of ids) where[i] = LOOSE;
+  selected.clear(); render();
+}
+
+function deleteFolder(col) {
+  const ids = Object.keys(where).filter((id) => where[id] === col.key);
+  if (!col.isNew && !confirm(`Delete the folder "${col.name}"?\n\nThe ${ids.length} chats in it stay in Telegram; ` +
+      "only the folder goes. Nothing changes until you click Save, and Undo in the terminal can bring it back.")) return;
+  for (const id of ids) {  // chats dragged in from elsewhere go back; its own chats become loose
+    where[id] = original[id] === col.key ? LOOSE : original[id];
+  }
+  freed[col.key] = ids.filter((id) => where[id] === LOOSE);
+  columns = columns.filter((c) => c !== col);
+  if (!col.isNew) deleted.push(col.name);
+  render();
+}
+
+function restoreFolder(name) {
+  deleted = deleted.filter((n) => n !== name);
+  const f = S.folders.find((x) => x.name === name);
+  const at = 1 + S.folders.filter((x) => x !== f && columns.some((c) => c.key === x.name)
+                                        && S.folders.indexOf(x) < S.folders.indexOf(f)).length;
+  columns.splice(at, 0, {key: f.name, name: f.name, emoticon: f.emoticon, typeRules: f.typeRules});
+  for (const id of freed[name] || []) if (where[id] === LOOSE) where[id] = name;  // not chats ✕'d before
+  delete freed[name];
+  render();
+}
+
 function matches(id, q) {
   if (!q) return true;
   const c = S.chats[id];
@@ -215,8 +306,15 @@ function reviewSave() {
   const ids = changes();
   const byTarget = {};
   for (const id of ids) (byTarget[where[id]] ??= []).push(id);
+  const n = pending();
   openDialog((d) => {
-    d.append(el("h2", null, `Save ${ids.length} change${ids.length > 1 ? "s" : ""} to Telegram?`));
+    d.append(el("h2", null, `Save ${n} change${n > 1 ? "s" : ""} to Telegram?`));
+    if (deleted.length) {
+      d.append(el("div", null, "Delete folders (their chats stay in Telegram):"));
+      const ul = el("ul");
+      for (const name of deleted) { const li = el("li", null, name); li.dir = "auto"; ul.append(li); }
+      d.append(ul);
+    }
     for (const [target, list] of Object.entries(byTarget)) {
       const col = columns.find((c) => c.key === target);
       d.append(el("div", null, target === LOOSE ? "Remove from their folder:" : `Move to ${col.name}${col.isNew ? " (new)" : ""}:`));
@@ -238,7 +336,7 @@ async function doSave(ids, button, dialog) {
   const moves = {};
   for (const id of ids) moves[id] = where[id] === LOOSE ? null : where[id];
   try {
-    const r = await api("save", {moves});
+    const r = await api("save", {moves, delete: deleted});
     if (r.ok) { closeDialog(); load(r.state); toast("Saved ✓"); return; }
     const box = el("div", "problems");
     for (const p of [...(r.problems || []), ...(r.error ? [r.error] : [])]) box.append(el("p", null, p));
@@ -249,7 +347,7 @@ async function doSave(ids, button, dialog) {
 }
 
 async function finish() {
-  if (changes().length && !confirm("You have unsaved changes. Leave without saving?")) return;
+  if (pending() && !confirm("You have unsaved changes. Leave without saving?")) return;
   finished = true;
   try { await api("done"); } catch (e) { /* the terminal may already be gone */ }
   document.body.innerHTML = "";
@@ -273,7 +371,7 @@ $("save").addEventListener("click", reviewSave);
 $("done").addEventListener("click", finish);
 $("modal").addEventListener("click", (e) => { if (e.target.id === "modal") closeDialog(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeDialog(); selected.clear(); render(); } });
-window.addEventListener("beforeunload", (e) => { if (!finished && changes().length) { e.preventDefault(); e.returnValue = ""; } });
+window.addEventListener("beforeunload", (e) => { if (!finished && pending()) { e.preventDefault(); e.returnValue = ""; } });
 
 api("state").then(load).catch((e) => { $("board").innerHTML = ""; $("board").append(el("div", "finished", String(e.message || e))); });
 </script>

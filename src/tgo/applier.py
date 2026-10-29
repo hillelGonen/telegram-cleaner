@@ -104,16 +104,30 @@ class FolderEditor(FolderWriter):
         return await self.run(backup, [(label, step)], on_step)
 
     async def apply_moves(self, moves: dict[int, str | None], limits: FolderLimits,
+                          delete: frozenset[str] = frozenset(),
                           on_step: Callable[[str], None] = lambda _: None) -> WriteResult:
         """Put each chat in `moves` into exactly the named folder (None = no folder), taking it
-        out of any other own folder. Folders that don't exist yet are created. Checks everything
-        first; writes nothing if a check fails."""
+        out of any other own folder. Folders that don't exist yet are created; own folders named
+        in `delete` are deleted (their chats stay in Telegram). Checks everything first; writes
+        nothing if a check fails."""
         live = await self.live()
         own = [f for f in live if isinstance(f, DialogFilter)]
         titles = {self._title(f) for f in live if self._title(f)}
         steps, problems = [], []
 
+        doomed = [f for f in own if self._title(f) in delete]
+        missing = set(delete) - {self._title(f) for f in doomed}
+        if missing:
+            problems.append(f"Can't delete {', '.join(sorted(missing))}: not one of your own folders.")
+        clash = sorted({t for t in moves.values() if t in delete})
+        if clash:
+            problems.append(f"Can't move chats into {', '.join(clash)}: it is being deleted.")
+        for f in doomed:
+            steps.append((f"delete {self._title(f)}", self._deleter(f.id)))
+
         for f in own:
+            if f in doomed:
+                continue
             name = self._title(f)
             leaving = {cid for cid, target in moves.items() if target != name}
             include = [p for p in f.include_peers if await self.peer_id(p) not in leaving]
@@ -131,7 +145,7 @@ class FolderEditor(FolderWriter):
             steps.append((f"update {name}", self._mover(f, include, pinned, adds)))
 
         new = sorted({t for t in moves.values() if t and t not in titles})
-        if len([f for f in live if TelethonMapper.filter_id(f)]) + len(new) > limits.folders:
+        if len([f for f in live if TelethonMapper.filter_id(f)]) - len(doomed) + len(new) > limits.folders:
             problems.append(f"Too many folders: your account allows {limits.folders}.")
         used = {TelethonMapper.filter_id(f) for f in live}
         free_ids = (i for i in range(FIRST_FILTER_ID, 256) if i not in used)
@@ -146,8 +160,12 @@ class FolderEditor(FolderWriter):
             return WriteResult(problems=problems)
         if not steps:
             return WriteResult()
-        backup = await self.backup(live, "before sorting in the browser")
+        reason = "before deleting folders" if doomed and not moves else "before sorting folders"
+        backup = await self.backup(live, reason)
         return await self.run(backup, steps, on_step)
+
+    def _deleter(self, filter_id: int):
+        return lambda: self.gw.delete_filter(filter_id)
 
     def _mover(self, live: DialogFilter, include: list, pinned: list, adds: list[int]):
         async def step():

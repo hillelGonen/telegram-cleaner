@@ -33,7 +33,7 @@ It reads your chats (again whenever the last read is over an hour old), then sho
 | 📊 Overview | Counts: channels, groups, private chats, bots; dead (1y+), noisy (1000+ unread), in no folder; folders |
 | 🧹 Clean up old chats | Pick types (or All types) + age (1 month … 2 years) → delete/leave, archive or mute |
 | 📭 Channels & groups I don't read | 50 / 100 / 300 / 1000+ unread (they still post, you don't read) → leave, mute, archive or mark read |
-| 📁 Sort into folders | **In your browser (recommended):** drag channels, groups and bots between folders, make new folders, then Save. Or in the terminal: pick a folder and type words like `news חדשות أخبار` |
+| 📁 Sort into folders | **In your browser (recommended):** drag channels, groups and bots between folders, ✕ to take one out of a folder, 🗑 to delete a folder, – to minimize a column, ＋ to make a folder; then Save. Or in the terminal: add by words like `news חדשות أخبار`, or delete folders |
 | ↩️ Undo | Undo the last folder change or last archive/mute; list chats you left with rejoin links |
 | 🔄 Rescan now | Read your chats again |
 

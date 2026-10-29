@@ -26,11 +26,11 @@ class SaveRequest(BaseModel):
     """chat id -> folder name, or None for "not in a folder"."""
 
     moves: dict[int, str | None] = Field(default_factory=dict)
+    delete: list[str] = Field(default_factory=list)  # folder names to delete
 
-    def checked(self, existing: set[str]) -> tuple[dict[int, str | None], list[str]]:
-        problems = [f"Folder name '{n}' is longer than {FOLDER_NAME_MAX} characters."
-                    for n in {t for t in self.moves.values() if t} if len(n) > FOLDER_NAME_MAX]
-        return self.moves, problems
+    def problems(self) -> list[str]:
+        return [f"Folder name '{n}' is longer than {FOLDER_NAME_MAX} characters."
+                for n in {t for t in self.moves.values() if t} if len(n) > FOLDER_NAME_MAX]
 
 
 class SorterBoard:
@@ -146,8 +146,9 @@ class SorterServer:
         return Handler
 
 
-def parse_save(data: dict, existing: set[str]) -> tuple[dict[int, str | None], list[str]]:
+def parse_save(data: dict) -> tuple[SaveRequest, list[str]]:
     try:
-        return SaveRequest.model_validate(data).checked(existing)
+        request = SaveRequest.model_validate(data)
     except ValidationError as e:
-        return {}, [f"Bad request: {e.errors()[0]['msg']}"]
+        return SaveRequest(), [f"Bad request: {e.errors()[0]['msg']}"]
+    return request, request.problems()

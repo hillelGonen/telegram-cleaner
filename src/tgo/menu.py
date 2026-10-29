@@ -191,11 +191,40 @@ class TgoApp:
         how = self.ask.select("How do you want to sort?", [
             Option("In your browser – drag and drop (recommended)", "web"),
             Option("Here – find channels by keywords", "keywords"),
+            Option("Delete folders", "delete"),
         ])
         if how == "web":
             self.sort_in_browser()
         elif how == "keywords":
             self.sort_by_keywords()
+        elif how == "delete":
+            self.delete_folders()
+
+    def delete_folders(self) -> None:
+        chats, folders, repo = self.load()
+        with repo:
+            limits = repo.folder_limits or FolderLimits()
+        own = [f for f in folders if f.kind == FolderKind.FILTER]
+        if not own:
+            self.console.print("You have no folders of your own to delete.")
+            return
+        names = self.ask.checkbox("Which folders to delete? (their chats stay in Telegram)",
+                                  [Option(f"{f.label} ({len(f.listed)} chats)", f.title) for f in own])
+        if not names:
+            return
+        self.console.print("Deleting only removes the folder; every chat in it stays. "
+                           "A backup is saved first, so Undo can bring it back.")
+        if not self.ask.confirm(f"Delete {len(names)} folder(s): {self.chats_view.names(names)}?",
+                                default=False):
+            return
+
+        async def work(tg):
+            result = await FolderEditor(tg, self.store, sleep=self.sleep).apply_moves(
+                {}, limits, frozenset(names))
+            if result.done:
+                await self._save_folders(tg)
+            return result
+        self.result_view.folder_write(self.telegram(work))
 
     def sort_in_browser(self) -> None:
         server = SorterServer()
@@ -227,13 +256,15 @@ class TgoApp:
 
     def _browser_save(self, data: dict) -> dict:
         board = self._board()
-        moves, problems = parse_save(data, {f.title for f in board.folders})
+        request, problems = parse_save(data)
         if problems:
             return {"ok": False, "problems": problems}
-        self.console.print(f"Saving {len(moves)} change(s) from the browser…")
+        n = len(request.moves) + len(request.delete)
+        self.console.print(f"Saving {n} change(s) from the browser…")
 
         async def work(tg):
-            result = await FolderEditor(tg, self.store, sleep=self.sleep).apply_moves(moves, board.limits)
+            editor = FolderEditor(tg, self.store, sleep=self.sleep)
+            result = await editor.apply_moves(request.moves, board.limits, frozenset(request.delete))
             if result.done:
                 await self._save_folders(tg)
             return result

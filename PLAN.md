@@ -25,7 +25,7 @@ quiet noisy channels, sort channels into folders, undo.
 | Overview | counts + folders |
 | Clean up old chats | types + age → leave/delete, archive, mute |
 | Channels & groups I don't read | unread threshold → leave, mute, archive, mark read |
-| Sort into folders | browser drag-and-drop board (recommended) · or folder + words in the terminal |
+| Sort into folders | browser board (recommended): move, remove, create, delete, minimize · terminal: add by words, delete folders |
 | Undo | restore last folder backup · reverse last archive/mute batch · rejoin links |
 
 ## Done

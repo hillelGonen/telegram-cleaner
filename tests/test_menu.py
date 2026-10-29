@@ -219,3 +219,14 @@ def test_sort_in_browser_end_to_end(make_app, gw, monkeypatch):
     assert gw.filters[-1].title.text == "Tech"
     names = [f["name"] for f in results["save"]["state"]["folders"]]
     assert "Tech" in names  # board reloaded from the refreshed local folders
+
+
+def test_delete_folders_from_terminal(make_app, gw):
+    make_app("Delete folders", ["News"], False).sort_folders()
+    assert gw.calls == []  # said no
+    app = make_app("Delete folders", ["News"], True)
+    app.sort_folders()
+    assert gw.calls == [("delete", 2)]
+    assert "News" not in [f.title for f in app.repo().folders()]
+    make_app("Undo last folder change", True).undo()
+    assert gw.filters[1].title.text == "News"
