@@ -44,7 +44,7 @@ def test_parse_save():
 
 @pytest.fixture
 def server():
-    srv = SorterServer()
+    srv = SorterServer(port=0)
     srv.start()
     yield srv
     srv.stop()
@@ -95,3 +95,14 @@ def test_unknown_route_rejected(server):
     with pytest.raises(urllib.error.HTTPError) as e:
         call(server, "delete-everything")
     assert e.value.code == 403
+
+
+def test_stable_port_with_fallback():
+    from tgo.sorter import DEFAULT_PORT
+    first = SorterServer()
+    second = SorterServer()  # default port now taken -> any free port
+    try:
+        assert first.port == DEFAULT_PORT and second.port != DEFAULT_PORT
+    finally:
+        first.stop()
+        second.stop()

@@ -20,6 +20,9 @@ from tgo.models import Chat, ChatType, Folder, FolderKind, FolderLimits
 SORTABLE = (ChatType.CHANNEL, ChatType.GROUP, ChatType.BOT)
 FOLDER_NAME_MAX = 12  # Telegram limit
 REPLY_TIMEOUT = 600  # seconds the browser waits for the terminal (a big save can take a while)
+# Same port each run keeps the page's address stable, so the browser remembers your settings
+# (theme, minimized columns, help seen). Any free port is used if this one is taken.
+DEFAULT_PORT = 47391
 
 
 class SaveRequest(BaseModel):
@@ -70,11 +73,14 @@ class SorterBoard:
 class SorterServer:
     """HTTP server on 127.0.0.1 (random port). Requests go to the main thread via `requests`."""
 
-    def __init__(self, port: int = 0):  # 0 = any free port
+    def __init__(self, port: int = DEFAULT_PORT):  # 0 = any free port
         self.token = secrets.token_urlsafe(18)
         self.requests: queue.Queue = queue.Queue()
         self._page = files("tgo").joinpath("sorter.html").read_text(encoding="utf-8")
-        self._httpd = ThreadingHTTPServer(("127.0.0.1", port), self._handler_class())
+        try:
+            self._httpd = ThreadingHTTPServer(("127.0.0.1", port), self._handler_class())
+        except OSError:  # taken (e.g. another tgo is open)
+            self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), self._handler_class())
         self.port = self._httpd.server_address[1]
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
 
@@ -86,7 +92,8 @@ class SorterServer:
         self._thread.start()
 
     def stop(self) -> None:
-        self._httpd.shutdown()
+        if self._thread.is_alive():  # shutdown() would wait forever on a server never started
+            self._httpd.shutdown()
         self._httpd.server_close()
 
     def next_request(self, timeout: float = 0.5):

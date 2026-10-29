@@ -69,6 +69,11 @@
   .dialog ul { margin: 6px 0 12px; padding-left: 18px; }
   .dialog .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
   .problems { color: var(--danger); }
+  .help { list-style: none; padding: 0; margin: 4px 0 8px; display: grid; gap: 9px; }
+  .help li { display: grid; grid-template-columns: 30px 1fr; align-items: start; }
+  .help .k { font-size: 16px; text-align: center; }
+  .help b { font-weight: 600; }
+  .safe { background: var(--accent-soft); border-radius: 8px; padding: 9px 11px; font-size: 13px; }
   .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--text);
            color: var(--bg); padding: 9px 16px; border-radius: 10px; opacity: 0; transition: opacity .2s; pointer-events: none; }
   .toast.show { opacity: .95; }
@@ -91,11 +96,12 @@
 <body>
 <header>
   <h1>📁 Sort into folders</h1>
-  <span class="hint">Drag cards between folders · ✕ removes from a folder · click cards to select several.</span>
+  <span class="hint">Drag chats between folders · <b>?</b> for help</span>
   <span id="deleted"></span>
   <span class="spacer"></span>
   <input type="search" id="search" placeholder="Search…" aria-label="Search chats">
   <button id="save" class="primary" disabled>Save</button>
+  <button id="help" title="How it works" aria-label="How it works">?</button>
   <button id="theme" title="Light / dark" aria-label="Switch light or dark theme">☀️</button>
   <button id="done">Done</button>
 </header>
@@ -298,6 +304,36 @@ function moveTo(key) {
   selected.clear(); dragging = []; render();
 }
 
+const HELP = [
+  ["✋", "<b>Drag</b> a card to another column to move it. A chat lives in one folder."],
+  ["☑️", "<b>Click</b> cards to select several, then drag them together."],
+  ["✕", "<b>Remove</b> a chat from its folder (on the card)."],
+  ["＋", "<b>New folder</b> on the right, up to 12 characters."],
+  ["🗑", "<b>Delete</b> a folder (on its header). Its chats stay in Telegram."],
+  ["–", "<b>Minimize</b> a column; click the strip to open it again."],
+  ["🔍", "<b>Search</b> filters every column at once."],
+];
+
+function showHelp() {
+  openDialog((d) => {
+    d.append(el("h2", null, "Sort your chats into folders"));
+    const ul = el("ul", "help");
+    for (const [icon, text] of HELP) {
+      const li = el("li"); const k = el("span", "k", icon); const t = el("span"); t.innerHTML = text;
+      li.append(k, t); ul.append(li);
+    }
+    d.append(ul);
+    d.append(el("div", "safe", "Nothing changes in Telegram until you click Save. You'll see a summary " +
+      "first, and a backup is kept, so Undo in the terminal can put everything back. Done takes you " +
+      "back to the terminal."));
+    const actions = el("div", "actions");
+    const ok = el("button", "primary", "Got it"); ok.onclick = closeDialog;
+    actions.append(ok); d.append(actions);
+    setTimeout(() => ok.focus(), 0);
+  });
+  try { localStorage.setItem("tgo-help-seen", "1"); } catch (e) { /* private mode */ }
+}
+
 function openDialog(build) { const d = $("dialog"); d.innerHTML = ""; build(d); $("modal").classList.add("open"); }
 function closeDialog() { $("modal").classList.remove("open"); }
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 2600); }
@@ -366,6 +402,7 @@ try { savedTheme = localStorage.getItem("tgo-theme"); } catch (e) { /* private m
 setTheme(savedTheme === "light");
 $("theme").addEventListener("click", () => setTheme(document.documentElement.dataset.theme !== "light"));
 
+$("help").addEventListener("click", showHelp);
 $("search").addEventListener("input", render);
 $("save").addEventListener("click", reviewSave);
 $("done").addEventListener("click", finish);
@@ -373,7 +410,12 @@ $("modal").addEventListener("click", (e) => { if (e.target.id === "modal") close
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeDialog(); selected.clear(); render(); } });
 window.addEventListener("beforeunload", (e) => { if (!finished && pending()) { e.preventDefault(); e.returnValue = ""; } });
 
-api("state").then(load).catch((e) => { $("board").innerHTML = ""; $("board").append(el("div", "finished", String(e.message || e))); });
+api("state").then((state) => {
+  load(state);
+  let seen = false;
+  try { seen = localStorage.getItem("tgo-help-seen") === "1"; } catch (e) { /* private mode */ }
+  if (!seen) showHelp();
+}).catch((e) => { $("board").innerHTML = ""; $("board").append(el("div", "finished", String(e.message || e))); });
 </script>
 </body>
 </html>
