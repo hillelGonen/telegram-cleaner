@@ -451,7 +451,7 @@ wheels = [
 ]
 
 [[package]]
-name = "tgo"
+name = "tg-cleaner"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

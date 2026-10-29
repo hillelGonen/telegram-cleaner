@@ -1,13 +1,21 @@
 [project]
-name = "tgo"
+name = "tg-cleaner"
 version = "0.1.0"
 description = "Clean up your Telegram from the terminal: leave dead chats, quiet unread channels, sort into folders."
 authors = [
     { name = "hillelGonen" }
 ]
+readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
+keywords = ["telegram", "cleanup", "folders", "cli"]
+classifiers = [
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Communications :: Chat",
+]
 dependencies = [
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.1",
@@ -22,9 +30,16 @@ dependencies = [
 [project.scripts]
 tgo = "tgo.cli:app"
 
+[project.urls]
+Homepage = "https://github.com/hillelGonen/telegram-cleaner"
+Issues = "https://github.com/hillelGonen/telegram-cleaner/issues"
+
 [build-system]
 requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "tgo"  # import name; the PyPI name is tg-cleaner
 
 [dependency-groups]
 dev = [

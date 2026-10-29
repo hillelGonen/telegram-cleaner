@@ -6,16 +6,20 @@ A small menu that helps you clean up and organize Telegram: delete old chats, le
 quiet noisy channels, and sort channels into folders.
 
 ## Install
-Needs [uv](https://docs.astral.sh/uv/getting-started/installation/).
 ```
-uv tool install git+https://github.com/hillelGonen/telegram-cleaner
+pipx install tg-cleaner      # or: uv tool install tg-cleaner
 tgo
 ```
+Python 3.12+. Plain `pip install tg-cleaner` works too; pipx/uv keep the tool in its own
+environment. Latest code straight from GitHub:
+`pipx install git+https://github.com/hillelGonen/telegram-cleaner`
+
 On first run `tgo` asks for your Telegram API id and hash (get them at https://my.telegram.org →
 "API development tools") and saves them to `~/.tgo/.env`. Your login and data live in `~/.tgo/`,
 readable only by you. `~/.tgo/data/tgo.session` gives full access to your account; never share it.
 
-Update: `uv tool upgrade tgo` · Remove: `uv tool uninstall tgo` (then delete `~/.tgo`).
+Update: `pipx upgrade tg-cleaner` · Remove: `pipx uninstall tg-cleaner` (then delete `~/.tgo`).
+With uv: `uv tool upgrade tg-cleaner` / `uv tool uninstall tg-cleaner`.
 
 ## Use
 ```
@@ -74,6 +78,9 @@ src/tgo/
 ```
 
 ## Development
+Release: bump `version` in pyproject.toml, commit, then `git tag vX.Y.Z && git push --tags`;
+the Publish workflow tests, builds and uploads to PyPI.
+
 ```
 git clone https://github.com/hillelGonen/telegram-cleaner && cd telegram-cleaner
 uv sync
